@@ -1,0 +1,167 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id            String    @id
+  name          String
+  email         String
+  emailVerified Boolean   @default(false)
+  image         String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  role          String?   @default("user")
+  banned        Boolean?  @default(false)
+  banReason     String?
+  banExpires    DateTime?
+
+  sessions     Session[]
+  accounts     Account[]
+  integrations Integration[]
+  listings     Listing[]
+
+  @@unique([email])
+  @@map("user")
+}
+
+model Session {
+  id             String   @id
+  expiresAt      DateTime
+  token          String
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  ipAddress      String?
+  userAgent      String?
+  userId         String
+  impersonatedBy String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([token])
+  @@index([userId])
+  @@map("session")
+}
+
+model Account {
+  id                    String    @id
+  accountId             String
+  providerId            String
+  userId                String
+  accessToken           String?
+  refreshToken          String?
+  idToken               String?
+  accessTokenExpiresAt  DateTime?
+  refreshTokenExpiresAt DateTime?
+  scope                 String?
+  password              String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("account")
+}
+
+model Verification {
+  id         String   @id
+  identifier String
+  value      String
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([identifier])
+  @@map("verification")
+}
+
+model Integration {
+  id               String    @id @default(cuid())
+  userId           String
+  provider         String
+  status           String    @default("disconnected")
+  environment      String    @default("sandbox")
+  username         String?
+  secretsCipher    String?
+  externalUserId   String?
+  externalUsername String?
+  lastVerifiedAt   DateTime?
+  lastError        String?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, provider])
+  @@map("integration")
+}
+
+model Listing {
+  id              String    @id @default(cuid())
+  userId          String
+  itemId          String
+  title           String
+  subtitle        String?
+  description     String?
+  thumbnailUrl    String?
+  picturesJson    String    @default("[]")
+  quantity        Int       @default(1)
+  price           Float?
+  startingBid     Float?
+  buyNowPrice     Float?
+  fixedPrice      Float?
+  isFixedPrice    Boolean   @default(false)
+  endingAt        DateTime?
+  sku             String?
+  upc             String?
+  reservePrice    Float?
+  collectorsElite Boolean   @default(false)
+  paymentMethodsJson String @default("{}")
+  whoPaysForShipping Int?
+  shippingProfileId Int?
+  shippingClassesJson String @default("{}")
+  shippingClassCostsJson String @default("{}")
+  condition Int?
+  isFflRequired Boolean @default(false)
+  weight Float?
+  weightUnit Int?
+  inspectionPeriod Int?
+  manufacturer String?
+  caliber String?
+  rounds Int?
+  mfgPartNumber String?
+  serialNumber String?
+  gtin String?
+  excludeStates String @default("")
+  listingDuration Int?
+  autoRelist Int?
+  autoRelistFixedCount Int?
+  premiumFeaturesJson String @default("{}")
+  lastImportedAt  DateTime  @default(now())
+  lastCommittedAt DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, itemId])
+  @@index([userId])
+  @@map("listing")
+}
+
+model DevEmail {
+  id        String   @id @default(cuid())
+  to        String
+  subject   String
+  text      String
+  html      String?
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+  @@map("dev_email")
+}

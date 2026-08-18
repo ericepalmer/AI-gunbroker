@@ -4,7 +4,8 @@ import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { toast } from "sonner";
 import { useRouter } from "next/navigation";
 import { ChevronDown } from "lucide-react";
-import { commitListingAction } from "@/app/app/inventory/actions";
+import { commitListingAction, deleteListingAction } from "@/app/app/inventory/actions";
+import { GUNBROKER_INVENTORY_PATH } from "@/lib/inventory-paths";
 import type {
   ListingDetail,
   ListingEdits,
@@ -34,10 +35,17 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { ConfirmFeesDialog } from "@/components/confirm-fees-dialog";
 import {
   ListingPhotos,
   type EditorPicture,
 } from "@/components/listing-photos";
+import {
+  addedListingFeeSummary,
+  formatFeeUsd,
+  LISTING_FEE_AMOUNTS,
+  type ListingFeeSummary,
+} from "@/lib/gunbroker/fees";
 
 function editsFrom(listing: ListingDetail): ListingEdits {
   const usingProfile =
@@ -136,6 +144,7 @@ export function ListingEditor({ initial }: { initial: ListingDetail }) {
   picturesRef.current = pictures;
   const [pending, startTransition] = useTransition();
   const [extraFeesOpen, setExtraFeesOpen] = useState(false);
+  const [feeConfirm, setFeeConfirm] = useState<ListingFeeSummary | null>(null);
 
   useEffect(() => {
     return () => revokeLocals(picturesRef.current);
@@ -206,7 +215,20 @@ export function ListingEditor({ initial }: { initial: ListingDetail }) {
   }
 
   function onClose() {
-    router.push("/app/inventory");
+    router.push(GUNBROKER_INVENTORY_PATH);
+  }
+
+  function onDelete() {
+    if (!window.confirm(`Delete “${snapshot.title}” from GunBroker?`)) return;
+    startTransition(async () => {
+      const result = await deleteListingAction(snapshot.itemId);
+      if (!result.ok) {
+        toast.error(result.error);
+        return;
+      }
+      toast.success("Listing deleted.");
+      router.push(GUNBROKER_INVENTORY_PATH);
+    });
   }
 
   function onDiscard() {
@@ -215,7 +237,7 @@ export function ListingEditor({ initial }: { initial: ListingDetail }) {
     setPictures(picturesFromListing(snapshot));
   }
 
-  function onCommit() {
+  function submitCommit() {
     startTransition(async () => {
       const formData = new FormData();
       formData.set("itemId", snapshot.itemId);
@@ -232,12 +254,37 @@ export function ListingEditor({ initial }: { initial: ListingDetail }) {
         return;
       }
       revokeLocals(pictures);
+      setFeeConfirm(null);
       setSnapshot(result.listing);
       setEdits(editsFrom(result.listing));
       setPictures(picturesFromListing(result.listing));
       toast.success("Changes sent to GunBroker.");
       router.refresh();
     });
+  }
+
+  function onCommit() {
+    const added = addedListingFeeSummary(
+      {
+        subtitle: snapshot.subtitle,
+        reservePrice: snapshot.reservePrice,
+        isFixedPrice: snapshot.isFixedPrice,
+        listingDuration: snapshot.listingDuration,
+        premiumFeatures: snapshot.premiumFeatures,
+      },
+      {
+        subtitle: edits.subtitle,
+        reservePrice: edits.reservePrice,
+        isFixedPrice: snapshot.isFixedPrice,
+        listingDuration: edits.listingDuration,
+        premiumFeatures: edits.premiumFeatures,
+      },
+    );
+    if (added.total > 0) {
+      setFeeConfirm(added);
+      return;
+    }
+    submitCommit();
   }
 
   return (
@@ -259,6 +306,9 @@ export function ListingEditor({ initial }: { initial: ListingDetail }) {
         <div className="flex flex-wrap gap-2">
           <Button type="button" variant="ghost" onClick={onClose} disabled={pending}>
             Close
+          </Button>
+          <Button type="button" variant="destructive" onClick={onDelete} disabled={pending}>
+            Delete
           </Button>
           <Button
             type="button"
@@ -720,7 +770,7 @@ export function ListingEditor({ initial }: { initial: ListingDetail }) {
                 onChange={(event) => setField("subtitle", event.target.value)}
               />
               <p className="text-xs text-muted-foreground">
-                Extra search-result line. GunBroker charges a subtitle fee.
+                Extra search-result line. +{formatFeeUsd(LISTING_FEE_AMOUNTS.subtitle)}.
               </p>
             </div>
             {snapshot.isFixedPrice ? null : (
@@ -737,7 +787,8 @@ export function ListingEditor({ initial }: { initial: ListingDetail }) {
                   }
                 />
                 <p className="text-xs text-muted-foreground">
-                  Hidden auction minimum. GunBroker charges a reserve fee.
+                  Hidden auction minimum. 2% of reserve, {formatFeeUsd(1)} to{" "}
+                  {formatFeeUsd(100)}.
                 </p>
               </div>
             )}
@@ -769,7 +820,7 @@ export function ListingEditor({ initial }: { initial: ListingDetail }) {
                 <span>
                   <span className="font-medium">{option.label}</span>
                   <span className="ml-2 text-xs text-muted-foreground">
-                    {option.fee}
+                    +{formatFeeUsd(LISTING_FEE_AMOUNTS[option.key])}
                   </span>
                   <span className="mt-1 block text-xs text-muted-foreground">
                     {option.description}
@@ -795,7 +846,9 @@ export function ListingEditor({ initial }: { initial: ListingDetail }) {
                 />
                 <span>
                   <span className="font-medium">Make my listing title colored</span>
-                  <span className="ml-2 text-xs text-muted-foreground">+$1.00</span>
+                  <span className="ml-2 text-xs text-muted-foreground">
+                    +{formatFeeUsd(LISTING_FEE_AMOUNTS.titleColor)}
+                  </span>
                   <span className="mt-1 block text-xs text-muted-foreground">
                     Your listing title is colored on the search results page.
                   </span>
@@ -845,7 +898,9 @@ export function ListingEditor({ initial }: { initial: ListingDetail }) {
                 />
                 <span>
                   <span className="font-medium">Scheduled Listing</span>
-                  <span className="ml-2 text-xs text-muted-foreground">+$1.00</span>
+                  <span className="ml-2 text-xs text-muted-foreground">
+                    +{formatFeeUsd(LISTING_FEE_AMOUNTS.scheduled)}
+                  </span>
                 </span>
               </label>
               {edits.premiumFeatures.isScheduled ? (
@@ -901,6 +956,16 @@ export function ListingEditor({ initial }: { initial: ListingDetail }) {
         }}
       />
       <p className="mt-5 text-xs text-muted-foreground">Item {snapshot.itemId}</p>
+      <ConfirmFeesDialog
+        open={feeConfirm != null}
+        title="Confirm extra listing fees"
+        description="GunBroker charges these optional listing fees now. They are not refunded if the item does not sell."
+        summary={feeConfirm ?? { lines: [], total: 0 }}
+        confirmLabel="Charge and commit"
+        pending={pending}
+        onCancel={() => setFeeConfirm(null)}
+        onConfirm={submitCommit}
+      />
     </div>
   );
 }

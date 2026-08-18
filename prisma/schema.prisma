@@ -24,6 +24,7 @@ model User {
   accounts     Account[]
   integrations Integration[]
   listings     Listing[]
+  wooProducts  WooProduct[]
 
   @@unique([email])
   @@map("user")
@@ -152,6 +153,42 @@ model Listing {
   @@unique([userId, itemId])
   @@index([userId])
   @@map("listing")
+}
+
+model WooProduct {
+  id             String   @id @default(cuid())
+  userId         String
+  productId      Int
+  parentId       Int      @default(0)
+  name           String
+  slug           String?
+  permalink      String?
+  sku            String?
+  upc            String?
+  type           String
+  status         String
+  stockStatus    String
+  price          Float?
+  regularPrice   Float?
+  stockQuantity  Int?
+  thumbnailUrl   String?
+  description    String?
+  categoriesJson String   @default("[]")
+  sourceForGunBroker Boolean @default(false)
+  linkedItemId   String?
+  quantitySource String   @default("woocommerce")
+  manualQuantity Int?
+  listedOnStore  Boolean  @default(true)
+  lastImportedAt DateTime @default(now())
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, productId])
+  @@index([userId])
+  @@index([userId, linkedItemId])
+  @@map("woo_product")
 }
 
 model DevEmail {

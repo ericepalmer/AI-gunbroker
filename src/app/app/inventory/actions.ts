@@ -4,6 +4,7 @@ import { cloneGunBrokerListing, commitListing, commitListingQuick, deleteGunBrok
 import type { ListingEdits } from "@/lib/gunbroker/types";
 import { getSession } from "@/lib/session";
 import { revalidatePath } from "next/cache";
+import { revalidateInventoryPages } from "@/lib/revalidate-inventory";
 
 async function requireUserId() {
   const session = await getSession();
@@ -18,7 +19,7 @@ export async function importInventoryAction() {
   if (!auth.ok) return auth;
   try {
     const result = await importGunBrokerInventory(auth.userId);
-    revalidatePath("/app/inventory");
+    revalidateInventoryPages();
     return { ok: true as const, count: result.count };
   } catch (error) {
     return {
@@ -47,7 +48,7 @@ export async function commitListingAction(formData: FormData) {
       removePictureIds: removePictureIds.filter(Boolean),
       added,
     });
-    revalidatePath("/app/inventory");
+    revalidateInventoryPages();
     revalidatePath(`/app/inventory/${itemId}`);
     return { ok: true as const, listing };
   } catch (error) {
@@ -66,7 +67,7 @@ export async function commitListingQuickAction(
   if (!auth.ok) return auth;
   try {
     await commitListingQuick(auth.userId, itemId, input);
-    revalidatePath("/app/inventory");
+    revalidateInventoryPages();
     revalidatePath(`/app/inventory/${itemId}`);
     return { ok: true as const };
   } catch (error) {
@@ -82,7 +83,7 @@ export async function deleteListingAction(itemId: string) {
   if (!auth.ok) return auth;
   try {
     await deleteGunBrokerListing(auth.userId, itemId);
-    revalidatePath("/app/inventory");
+    revalidateInventoryPages();
     revalidatePath(`/app/inventory/${itemId}`);
     return { ok: true as const };
   } catch (error) {
@@ -98,7 +99,7 @@ export async function cloneListingAction(itemId: string) {
   if (!auth.ok) return auth;
   try {
     const newItemId = await cloneGunBrokerListing(auth.userId, itemId);
-    revalidatePath("/app/inventory");
+    revalidateInventoryPages();
     revalidatePath(`/app/inventory/${newItemId}`);
     return { ok: true as const, itemId: newItemId };
   } catch (error) {

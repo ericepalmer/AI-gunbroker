@@ -1,6 +1,6 @@
 import { PrismaClient } from "@prisma/client";
 
-const PRISMA_CLIENT_REV = 8;
+const PRISMA_CLIENT_REV = 12;
 
 const globalForPrisma = globalThis as unknown as {
   prisma?: PrismaClient;
@@ -16,7 +16,8 @@ function createPrismaClient() {
 function isCurrentClient(client: PrismaClient | undefined) {
   return (
     globalForPrisma.prismaRev === PRISMA_CLIENT_REV &&
-    typeof client?.listing?.findMany === "function"
+    typeof client?.listing?.findMany === "function" &&
+    typeof client?.wooProduct?.findMany === "function"
   );
 }
 

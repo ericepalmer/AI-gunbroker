@@ -1,6 +1,7 @@
 import { decryptSecret, encryptSecret } from "@/lib/crypto";
 import {
   GUNBROKER_PROVIDER,
+  gunBrokerDefaultUsername,
   gunBrokerDevKey,
   gunBrokerEnvironment,
 } from "@/lib/gunbroker/config";
@@ -29,7 +30,15 @@ function explainGunBrokerError(error: unknown) {
         : "Could not connect to GunBroker.";
 
   if (/unapproved user parameter/i.test(raw)) {
-    return "GunBroker rejected this login for the configured API key. The key may need your current IP whitelisted. Email api@gunbroker.com.";
+    return gunBrokerEnvironment() === "sandbox"
+      ? "Sandbox rejected this API key. Confirm GUNBROKER_SANDBOX_DEVKEY, then email api@gunbroker.com if it still fails."
+      : "GunBroker rejected this login for the configured API key. The key may need your current IP whitelisted. Email api@gunbroker.com.";
+  }
+
+  if (/unauthorized/i.test(raw)) {
+    return gunBrokerEnvironment() === "sandbox"
+      ? "Sandbox rejected that username or password. Use the login from sandbox.gunbroker.com — the live GunBroker password will not work here."
+      : "GunBroker rejected that username or password.";
   }
 
   return raw;
@@ -46,7 +55,8 @@ export async function getGunBrokerStatus(userId: string): Promise<GunBrokerStatu
 
   return {
     status: (row?.status as GunBrokerStatus["status"]) ?? "disconnected",
-    username: row?.username ?? null,
+    environment: gunBrokerEnvironment(),
+    username: row?.username ?? gunBrokerDefaultUsername(),
     hasPassword: Boolean(row?.secretsCipher),
     externalUserId: row?.externalUserId ?? null,
     externalUsername: row?.externalUsername ?? null,

@@ -76,11 +76,17 @@ export function GunBrokerSettings({ initial }: { initial: GunBrokerStatus }) {
       <CardHeader>
         <div className="flex items-center justify-between gap-4">
           <CardTitle>GunBroker</CardTitle>
-          <Badge tone={statusTone(initial.status)}>{statusLabel(initial.status)}</Badge>
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            <Badge tone="default">
+              {initial.environment === "production" ? "Production" : "Sandbox"}
+            </Badge>
+            <Badge tone={statusTone(initial.status)}>{statusLabel(initial.status)}</Badge>
+          </div>
         </div>
         <CardDescription>
-          Connect the seller login for this Chamber account. Each account has one
-          GunBroker connection.
+          {initial.environment === "sandbox"
+            ? "This desk talks to sandbox.gunbroker.com. Use that site’s username and password — the live GunBroker login will not work here."
+            : "This desk talks to the live GunBroker API. Use your gunbroker.com seller login."}
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">

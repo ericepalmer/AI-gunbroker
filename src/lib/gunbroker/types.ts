@@ -13,6 +13,7 @@ export type GunBrokerAccount = {
 
 export type GunBrokerStatus = {
   status: "disconnected" | "connected" | "error";
+  environment: GunBrokerEnvironment;
   username: string | null;
   hasPassword: boolean;
   externalUserId: string | null;
@@ -161,6 +162,10 @@ export type ListingCard = {
   quantity: number;
   price: number | null;
   isFixedPrice: boolean;
+  subtitle: string | null;
+  reservePrice: number | null;
+  listingDuration: number | null;
+  premiumFeatures: PremiumFeatures;
 };
 
 export type ListingDetail = ListingCard & {

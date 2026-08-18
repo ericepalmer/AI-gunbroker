@@ -9,7 +9,9 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { GunBrokerSettings } from "@/components/gunbroker-settings";
+import { WooCommerceSettings } from "@/components/woocommerce-settings";
 import type { GunBrokerStatus } from "@/lib/gunbroker/types";
+import type { WooCommerceStatus } from "@/lib/woocommerce/types";
 
 type SessionRow = {
   id: string;
@@ -315,39 +317,32 @@ export function SessionSettings({
 
 export function ConnectionSettings({
   gunbroker,
+  woocommerce,
 }: {
   gunbroker: GunBrokerStatus;
+  woocommerce: WooCommerceStatus;
 }) {
   return (
     <div className="grid gap-4">
       <GunBrokerSettings initial={gunbroker} />
-      {[
-        {
-          id: "shipstation",
-          title: "ShipStation",
-          body: "API key so closed GunBroker orders become shipments. There is no native GunBroker connector — Chamber is that bridge.",
-        },
-        {
-          id: "woocommerce",
-          title: "WooCommerce",
-          body: "Store URL plus consumer key/secret to keep quantities aligned. We will try the REST API first and only add a plugin if WordPress needs extra hooks.",
-        },
-      ].map((item) => (
-        <Card key={item.id}>
-          <CardHeader>
-            <div className="flex items-center justify-between">
-              <CardTitle>{item.title}</CardTitle>
-              <Badge>Not connected</Badge>
-            </div>
-            <CardDescription>{item.body}</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <Button type="button" variant="secondary" disabled>
-              Connect in a later build
-            </Button>
-          </CardContent>
-        </Card>
-      ))}
+      <WooCommerceSettings initial={woocommerce} />
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <CardTitle>ShipStation</CardTitle>
+            <Badge>Not connected</Badge>
+          </div>
+          <CardDescription>
+            API key so closed GunBroker orders become shipments. There is no native
+            GunBroker connector — Chamber is that bridge.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Button type="button" variant="secondary" disabled>
+            Connect in a later build
+          </Button>
+        </CardContent>
+      </Card>
     </div>
   );
 }

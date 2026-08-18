@@ -451,6 +451,10 @@ function toCard(row: {
   quantity: number;
   price: number | null;
   isFixedPrice: boolean;
+  subtitle: string | null;
+  reservePrice: number | null;
+  listingDuration: number | null;
+  premiumFeaturesJson: string;
 }): ListingCard {
   return {
     itemId: row.itemId,
@@ -460,6 +464,10 @@ function toCard(row: {
     quantity: row.quantity,
     price: row.price,
     isFixedPrice: row.isFixedPrice,
+    subtitle: row.subtitle,
+    reservePrice: row.reservePrice,
+    listingDuration: row.listingDuration,
+    premiumFeatures: parsePremiumFeatures(row.premiumFeaturesJson),
   };
 }
 
@@ -761,9 +769,7 @@ export async function commitListing(
     throw new Error("That listing is not in your inventory. Import from GunBroker first.");
   }
 
-  const title = edits.title.trim();
-  if (!title) throw new Error("Title is required.");
-  if (title.length > 75) throw new Error("Title must be 75 characters or fewer.");
+  const title = normalizeGunBrokerTitle(edits.title);
   const subtitle = edits.subtitle.trim();
   if (subtitle.length > 50) throw new Error("Subtitle must be 50 characters or fewer.");
   const quantity = Math.max(1, Math.round(edits.quantity));
@@ -1042,10 +1048,43 @@ export async function commitListingQuick(
   });
 }
 
-function cloneTitle(title: string) {
+function toTitleCaseWords(value: string) {
+  return value
+    .toLowerCase()
+    .split(/\s+/)
+    .map((word) => {
+      if (!word) return word;
+      return `${word[0]!.toUpperCase()}${word.slice(1)}`;
+    })
+    .join(" ");
+}
+
+/** GunBroker title rules: <=75 chars, no quotes/asterisks, no all-caps. */
+export function normalizeGunBrokerTitle(value: string) {
+  const stripped = value
+    .replace(/<[^>]*>/g, " ")
+    .replace(/["'`*]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!stripped) throw new Error("Title is required.");
+
+  const hasLower = /[a-z]/.test(stripped);
+  const hasUpper = /[A-Z]/.test(stripped);
+  const normalized = hasUpper && !hasLower ? toTitleCaseWords(stripped) : stripped;
+  const finalTitle = normalized.slice(0, 75).trim();
+  if (!finalTitle) throw new Error("Title is required.");
+  return finalTitle;
+}
+
+function cloneTitle(templateTitle: string, preferredTitle?: string | null) {
+  if (preferredTitle?.trim()) return normalizeGunBrokerTitle(preferredTitle);
   const suffix = " clone";
-  if (title.length + suffix.length <= 75) return `${title}${suffix}`;
-  return `${title.slice(0, 75 - suffix.length)}${suffix}`;
+  const base = templateTitle.trim();
+  const withSuffix =
+    base.length + suffix.length <= 75
+      ? `${base}${suffix}`
+      : `${base.slice(0, 75 - suffix.length)}${suffix}`;
+  return normalizeGunBrokerTitle(withSuffix);
 }
 
 function copyValue(source: unknown, ...names: string[]) {
@@ -1324,6 +1363,12 @@ function clonePayload(
     autoRelistFixedCount: number | null;
     premiumFeatures: PremiumFeatures;
   },
+  overlay?: {
+    description?: string | null;
+    sku?: string | null;
+    upc?: string | null;
+    pictureUrls?: string[] | null;
+  },
 ) {
   const isFixedPrice = isFixedPriceOf(item);
   const source =
@@ -1349,8 +1394,10 @@ function clonePayload(
   const body: Record<string, unknown> = {
     Title: title,
     Description:
-      asString(copyValue(item, "descriptionOnly", "DescriptionOnly", "description", "Description")) ??
-      title,
+      overlay && "description" in overlay
+        ? overlay.description?.trim() || title
+        : (asString(copyValue(item, "descriptionOnly", "DescriptionOnly", "description", "Description")) ??
+          title),
     CategoryID: asEnumId(copyValue(item, "categoryID", "CategoryID", "categoryId")),
     Condition: flags.condition ?? sourceFlags.condition ?? stored.condition ?? 1,
     CountryCode: countryCodeOf(source),
@@ -1373,8 +1420,8 @@ function clonePayload(
     throw new Error("Could not find a postal code to clone this listing.");
   }
   body.PostalCode = postalCode;
-  setIfPresent(body, "SKU", copyValue(item, "sku", "SKU"));
-  setIfPresent(body, "UPC", copyValue(item, "upc", "UPC"));
+  setIfPresent(body, "SKU", overlay?.sku ?? copyValue(item, "sku", "SKU"));
+  setIfPresent(body, "UPC", overlay?.upc ?? copyValue(item, "upc", "UPC"));
   setIfPresent(
     body,
     "GTIN",
@@ -1493,7 +1540,9 @@ function clonePayload(
         : stored.shippingClassCosts,
   });
 
-  const urls = pictureUrlsOf(item, pictures);
+  const overlayUrls = (overlay?.pictureUrls ?? [])
+    .filter((url) => url.startsWith("https://"));
+  const urls = overlayUrls.length ? overlayUrls : pictureUrlsOf(item, pictures);
   if (urls.length) body.PictureURLs = urls;
 
   const premiumFeatures = hasAnyPremiumFeature(stored.premiumFeatures)
@@ -1535,7 +1584,17 @@ export async function deleteGunBrokerListing(userId: string, itemId: string) {
   });
 }
 
-export async function cloneGunBrokerListing(userId: string, itemId: string) {
+export async function cloneGunBrokerListing(
+  userId: string,
+  itemId: string,
+  options?: {
+    preferredTitle?: string | null;
+    preferredDescription?: string | null;
+    preferredSku?: string | null;
+    preferredUpc?: string | null;
+    preferredPictureUrls?: string[] | null;
+  },
+) {
   const existing = await prisma.listing.findUnique({
     where: { userId_itemId: { userId, itemId } },
   });
@@ -1543,7 +1602,16 @@ export async function cloneGunBrokerListing(userId: string, itemId: string) {
     throw new Error("That listing is not in your inventory. Import from GunBroker first.");
   }
 
-  const title = cloneTitle(existing.title);
+  const title = cloneTitle(existing.title, options?.preferredTitle);
+  const overlay =
+    options && "preferredDescription" in options
+      ? {
+          description: options.preferredDescription,
+          sku: options.preferredSku,
+          upc: options.preferredUpc,
+          pictureUrls: options.preferredPictureUrls,
+        }
+      : undefined;
   const created = await withGunBrokerAccess(userId, async (accessToken) => {
     const [item, pictureRows, defaults, account, contact] = await Promise.all([
       getItem(accessToken, itemId),
@@ -1589,6 +1657,7 @@ export async function cloneGunBrokerListing(userId: string, itemId: string) {
           autoRelistFixedCount: existing.autoRelistFixedCount,
           premiumFeatures: parsePremiumFeatures(existing.premiumFeaturesJson),
         },
+        overlay,
       ),
     );
     const newItemId = newItemIdFrom(payload);
@@ -1600,8 +1669,22 @@ export async function cloneGunBrokerListing(userId: string, itemId: string) {
   });
 
   const mapped = created.createdItem ? mapSummary(created.createdItem) : null;
+  const description =
+    overlay && "description" in overlay
+      ? overlay.description?.trim() || title
+      : existing.description;
+  const sku = overlay?.sku ?? existing.sku;
+  const upc = overlay?.upc ?? existing.upc;
+  const thumbnailUrl = overlay?.pictureUrls?.[0] ?? existing.thumbnailUrl;
   if (mapped) {
-    await persistMapped(userId, { ...mapped, title });
+    await persistMapped(userId, {
+      ...mapped,
+      title,
+      description: description ?? mapped.description,
+      sku: sku ?? mapped.sku,
+      upc: upc ?? mapped.upc,
+      thumbnailUrl: thumbnailUrl ?? mapped.thumbnailUrl,
+    });
     return mapped.itemId;
   }
 
@@ -1613,9 +1696,15 @@ export async function cloneGunBrokerListing(userId: string, itemId: string) {
     itemId: created.newItemId,
     title,
     subtitle: null,
-    description: existing.description ?? null,
-    thumbnailUrl: existing.thumbnailUrl ?? null,
-    pictures: created.pictures,
+    description: description ?? null,
+    thumbnailUrl: thumbnailUrl ?? null,
+    pictures: overlay?.pictureUrls?.length
+      ? overlay.pictureUrls.map((url, index) => ({
+          url,
+          pictureId: null,
+          displayOrder: index + 1,
+        }))
+      : created.pictures,
     quantity: existing.quantity,
     startingBid: existing.startingBid,
     buyNowPrice: existing.buyNowPrice,
@@ -1623,8 +1712,8 @@ export async function cloneGunBrokerListing(userId: string, itemId: string) {
     isFixedPrice: existing.isFixedPrice,
     price: existing.price,
     endingAt: existing.endingAt,
-    sku: existing.sku,
-    upc: existing.upc,
+    sku,
+    upc,
     reservePrice: null,
     collectorsElite: false,
     paymentMethods: parsePaymentMethods(existing.paymentMethodsJson),

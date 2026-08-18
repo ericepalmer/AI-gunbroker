@@ -12,15 +12,21 @@ export default async function AppHomePage() {
         Welcome, {session?.user.name.split(" ")[0] ?? "seller"}.
       </h1>
       <p className="mt-3 max-w-2xl text-muted-foreground">
-        Account, GunBroker connection, and inventory import are live. Relist,
-        ShipStation, and WooCommerce are next.
+        Account, GunBroker, inventory, and WooCommerce import are live. Relist
+        and ShipStation are next.
       </p>
       <div className="mt-8 grid gap-4 md:grid-cols-3">
         {[
           {
-            href: "/app/inventory",
-            title: "Inventory",
-            body: "GunBroker listings, dates, prices, quantities, and a back-sync.",
+            href: "/app/inventory/gunbroker",
+            title: "GunBroker inventory",
+            body: "Listings, sources, and quantity links.",
+            badge: "Live",
+          },
+          {
+            href: "/app/inventory/woocommerce",
+            title: "WooCommerce inventory",
+            body: "Store catalog, filters, and GunBroker sources.",
             badge: "Live",
           },
           {
@@ -30,10 +36,10 @@ export default async function AppHomePage() {
             badge: "Planned",
           },
           {
-            href: "/app/settings",
+            href: "/app/settings?tab=connections",
             title: "Connections",
-            body: "GunBroker, ShipStation, and WooCommerce credentials live under Settings.",
-            badge: "Stub",
+            body: "GunBroker and WooCommerce credentials live under Settings.",
+            badge: "Live",
           },
         ].map((card) => (
           <Link

@@ -8,6 +8,7 @@ import {
   getItem,
   getItemPictures,
   getListingDefaults,
+  getCategoryCharacteristics,
   listItemsSelling,
   updateItem,
 } from "@/lib/gunbroker/client";
@@ -21,6 +22,7 @@ import {
   asNumber,
   asString,
   characteristicValue,
+  characteristicDisplayValue,
   emptyPremiumFeatures,
   excludeStatesEqual,
   excludeStatesText,
@@ -59,7 +61,186 @@ import {
   type ShippingClassCosts,
   type ShippingClasses,
 } from "@/lib/gunbroker/types";
+import {
+  reportImportProgress,
+  reportSaveProgress,
+  type ImportProgressHandler,
+} from "@/lib/import-progress";
 import { prisma } from "@/lib/prisma";
+
+const OTHER_MANUFACTURER = "OTHER MANUFACTURER";
+
+async function createItemForClone(
+  accessToken: string,
+  requestBody: Record<string, unknown>,
+) {
+  const body = withObjectCharacteristics(requestBody);
+  try {
+    const payload = await createItem(accessToken, body);
+    const newItemId = newItemIdFrom(payload);
+    if (!newItemId) {
+      throw new Error("GunBroker listed the clone but did not return a new item number.");
+    }
+    const createdItem = await getItem(accessToken, newItemId).catch(() => null);
+    return { payload, newItemId, createdItem };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "";
+    if (!isManufacturerValidationError(message)) throw error;
+    const retryBody = withObjectCharacteristics(
+      withManufacturer(body, OTHER_MANUFACTURER),
+    );
+    const payload = await createItem(accessToken, retryBody);
+    const newItemId = newItemIdFrom(payload);
+    if (!newItemId) {
+      throw new Error("GunBroker listed the clone but did not return a new item number.");
+    }
+    const createdItem = await getItem(accessToken, newItemId).catch(() => null);
+    return { payload, newItemId, createdItem };
+  }
+}
+
+function sentCharacteristicValues(body: Record<string, unknown>) {
+  const obj = characteristicsAsObject(body.Characteristics);
+  const manufacturer =
+    characteristicDisplayValue(obj.manufacturerName) ??
+    characteristicDisplayValue(obj.Manufacture) ??
+    characteristicDisplayValue(obj.Manufacturer) ??
+    asString(obj.manufacturerName) ??
+    asString(obj.Manufacture) ??
+    asString(obj.Manufacturer) ??
+    asString(body.Manufacturer) ??
+    asString(body.Manufacture);
+  const caliber =
+    characteristicDisplayValue(obj.Caliber) ??
+    characteristicDisplayValue(obj.Gauge) ??
+    asString(obj.Caliber) ??
+    asString(obj.Gauge) ??
+    asString(body.Caliber);
+  const rounds =
+    parseRounds(characteristicDisplayValue(obj.NumberOfRoundsPerQuantityOne)) ??
+    parseRounds(characteristicDisplayValue(obj.NumberOfRoundsForSale)) ??
+    parseRounds(obj.NumberOfRoundsPerQuantityOne) ??
+    parseRounds(obj.NumberOfRoundsForSale) ??
+    parseRounds(body.NumberOfRoundsPerQuantityOne);
+  return { manufacturer, caliber, rounds };
+}
+
+function withObjectCharacteristics(payload: Record<string, unknown>): Record<string, unknown> {
+  const obj = characteristicsAsObject(payload.Characteristics);
+  if (Object.keys(obj).length === 0) return payload;
+  return {
+    ...payload,
+    Characteristics: obj,
+    HasCharacteristics: true,
+  };
+}
+
+async function updateItemRespectingManufacturer(
+  accessToken: string,
+  itemId: string,
+  payload: Record<string, unknown>,
+) {
+  const body = withObjectCharacteristics(payload);
+  try {
+    await updateItem(accessToken, itemId, body);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "";
+    if (!isManufacturerValidationError(message)) throw error;
+    const current = asString(body.Manufacturer) ?? asString(body.Manufacture);
+    if (isOtherManufacturer(current)) throw error;
+    await updateItem(
+      accessToken,
+      itemId,
+      withObjectCharacteristics(withManufacturer(body, OTHER_MANUFACTURER)),
+    );
+  }
+}
+
+function isOtherManufacturer(value: string | null | undefined) {
+  return value?.trim().toLowerCase().replace(/[^a-z0-9]/g, "") === "othermanufacturer";
+}
+
+function isManufacturerValidationError(message: string) {
+  return (
+    /manufacturer|manufacture/i.test(message) &&
+    /invalid|not valid|unknown|does not exist|not found|not allowed|unrecognized|must be/i.test(
+      message,
+    )
+  );
+}
+
+function withManufacturer(
+  payload: Record<string, unknown>,
+  manufacturer: string,
+  catalog: CharacteristicCatalogEntry[] = [],
+) {
+  const next: Record<string, unknown> = {
+    ...payload,
+    Manufacturer: manufacturer,
+    Manufacture: manufacturer,
+  };
+  applyCharacteristicsOnBody(
+    next,
+    payload.Characteristics,
+    {
+      manufacturer,
+      caliber: asString(payload.Caliber) ?? null,
+      rounds: parseRounds(payload.NumberOfRoundsPerQuantityOne),
+    },
+    catalog,
+  );
+  return next;
+}
+
+function catalogOtherManufacturer(catalog: CharacteristicCatalogEntry[]) {
+  const values =
+    findCatalogEntry(catalog, "manufacturerName", "Manufacturer", "Manufacture")?.values ?? [];
+  return (
+    matchCatalogValue("OTHER MANUFACTURER", values, false) ??
+    values.find((value) => {
+      const normalized = normalizeCharacteristicValue(value);
+      return normalized === "othermanufacturer" || normalized === "other";
+    }) ??
+    OTHER_MANUFACTURER
+  );
+}
+
+async function fallbackManufacturerIfUnset(
+  accessToken: string,
+  itemId: string,
+  liveItem: unknown,
+  caliber?: string | null,
+) {
+  if (readManufacturer(liveItem)) return liveItem;
+  const categoryId = asEnumId(
+    pickField(liveItem, "categoryID", "CategoryID", "categoryId"),
+  );
+  const catalog = categoryId
+    ? parseCharacteristicCatalog(
+        await getCategoryCharacteristics(accessToken, categoryId).catch(() => []),
+      )
+    : [];
+  const body = withManufacturer(
+    {
+      Characteristics: copyValue(
+        liveItem,
+        "characteristics",
+        "Characteristics",
+        "itemCharacteristics",
+        "ItemCharacteristics",
+      ),
+      Caliber: caliber ?? itemDetailsFromItem(liveItem).caliber,
+    },
+    catalogOtherManufacturer(catalog),
+    catalog,
+  );
+  await updateItem(accessToken, itemId, body);
+  return (await getItem(accessToken, itemId).catch(() => liveItem)) ?? liveItem;
+}
+
+function readManufacturer(item: unknown) {
+  return itemDetailsFromItem(item).manufacturer;
+}
 
 function itemIdOf(item: unknown) {
   return asString(pickField(item, "itemID", "ItemID", "itemId"));
@@ -275,8 +456,17 @@ function itemDetailsFromItem(item: unknown) {
   const autoRelist = parseAutoRelist(autoRelistRaw);
   return {
     manufacturer:
-      asEnumName(pickField(item, "manufacturer", "Manufacturer")) ??
-      asEnumName(characteristicValue(item, "manufacturer", "Manufacturer")),
+      asEnumName(pickField(item, "manufacturer", "Manufacturer", "manufacture", "Manufacture", "manufacturerName")) ??
+      asEnumName(
+        characteristicValue(
+          item,
+          "manufacturer",
+          "Manufacturer",
+          "manufacture",
+          "Manufacture",
+          "manufacturerName",
+        ),
+      ),
     caliber:
       asEnumName(pickField(item, "caliber", "Caliber", "gauge", "Gauge")) ??
       asEnumName(characteristicValue(item, "caliber", "Caliber", "gauge", "Gauge")),
@@ -561,7 +751,10 @@ export async function listLocalInventory(userId: string) {
   return rows.map(toCard);
 }
 
-export async function importGunBrokerInventory(userId: string) {
+export async function importGunBrokerInventory(
+  userId: string,
+  onProgress?: ImportProgressHandler,
+) {
   if (!(await isGunBrokerConnected(userId))) {
     throw new Error("Connect GunBroker in Settings before importing listings.");
   }
@@ -576,6 +769,11 @@ export async function importGunBrokerInventory(userId: string) {
         const mapped = mapSummary(item);
         if (mapped) items.push(mapped);
       }
+      await reportImportProgress(onProgress, {
+        loaded: items.length,
+        total: page.count > 0 ? page.count : null,
+        phase: "loading",
+      });
       if (page.results.length < pageSize || items.length >= page.count) break;
       pageIndex += 1;
       if (pageIndex > 50) break;
@@ -584,10 +782,14 @@ export async function importGunBrokerInventory(userId: string) {
 
   const now = new Date();
   const itemIds = items.map((item) => item.itemId);
+  await reportImportProgress(onProgress, {
+    loaded: items.length,
+    total: items.length,
+    phase: "saving",
+  });
 
-  await prisma.$transaction(async (tx) => {
-    for (const item of items) {
-      await tx.listing.upsert({
+  for (const [index, item] of items.entries()) {
+    await prisma.listing.upsert({
         where: { userId_itemId: { userId, itemId: item.itemId } },
         create: {
           userId,
@@ -662,13 +864,13 @@ export async function importGunBrokerInventory(userId: string) {
           lastImportedAt: now,
         },
       });
-    }
-    await tx.listing.deleteMany({
-      where: {
-        userId,
-        itemId: { notIn: itemIds.length ? itemIds : ["__none__"] },
-      },
-    });
+    await reportSaveProgress(onProgress, index, items.length);
+  }
+  await prisma.listing.deleteMany({
+    where: {
+      userId,
+      itemId: { notIn: itemIds.length ? itemIds : ["__none__"] },
+    },
   });
 
   return { count: items.length };
@@ -851,8 +1053,13 @@ export async function commitListing(
   const mfgPartNumber = (edits.mfgPartNumber ?? "").trim();
   const serialNumber = (edits.serialNumber ?? "").trim();
   const gtin = (edits.gtin ?? "").trim();
-  if (manufacturer !== (existing.manufacturer ?? "")) body.Manufacturer = manufacturer;
+  if (manufacturer !== (existing.manufacturer ?? "")) {
+    body.Manufacturer = manufacturer;
+  }
   if (caliber !== (existing.caliber ?? "")) body.Caliber = caliber;
+  if (edits.rounds !== existing.rounds) {
+    setRoundsOnBody(body, edits.rounds);
+  }
   if (mfgPartNumber !== (existing.mfgPartNumber ?? "")) {
     body.MfgPartNumber = mfgPartNumber;
   }
@@ -863,12 +1070,11 @@ export async function commitListing(
     caliber !== (existing.caliber ?? "") ||
     edits.rounds !== existing.rounds
   ) {
-    const characteristics = overlayCharacteristics(null, {
+    applyCharacteristicsOnBody(body, null, {
       manufacturer: manufacturer || null,
       caliber: caliber || null,
       rounds: edits.rounds,
     });
-    if (characteristics) body.Characteristics = characteristics;
   }
   if (
     edits.listingDuration != null &&
@@ -926,7 +1132,11 @@ export async function commitListing(
 
   const nextPictures = await withGunBrokerAccess(userId, async (accessToken) => {
     if (Object.keys(body).length) {
-      await updateItem(accessToken, itemId, body);
+      await updateItemRespectingManufacturer(accessToken, itemId, body);
+      if (manufacturer) {
+        const live = await getItem(accessToken, itemId).catch(() => null);
+        await fallbackManufacturerIfUnset(accessToken, itemId, live, caliber || null);
+      }
     }
     for (const pictureId of removePictureIds) {
       try {
@@ -1291,6 +1501,221 @@ function firstPaymentMethods(...values: unknown[]) {
   return parsePaymentMethods(null);
 }
 
+type CharacteristicCatalogEntry = {
+  name: string;
+  values: string[];
+};
+
+function normalizeCharacteristicKey(value: string) {
+  return value.toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+function normalizeCharacteristicValue(value: string) {
+  return value
+    .toLowerCase()
+    .replace(/\b(caliber|calibre|gauge|govt|government)\b/g, "")
+    .replace(/[^a-z0-9]/g, "");
+}
+
+function parseCharacteristicCatalog(raw: unknown[]): CharacteristicCatalogEntry[] {
+  return raw.flatMap((row) => {
+    if (!row || typeof row !== "object") return [];
+    const record = row as Record<string, unknown>;
+    const name = asString(
+      pickField(
+        record,
+        "name",
+        "Name",
+        "characteristicName",
+        "CharacteristicName",
+        "label",
+        "Label",
+      ),
+    );
+    if (!name) return [];
+    const valuesRaw = pickField(
+      record,
+      "values",
+      "Values",
+      "options",
+      "Options",
+      "possibleValues",
+      "PossibleValues",
+      "characteristicValues",
+      "CharacteristicValues",
+      "allowedValues",
+      "AllowedValues",
+    );
+    const values: string[] = [];
+    if (Array.isArray(valuesRaw)) {
+      for (const entry of valuesRaw) {
+        const next = asEnumName(entry) ?? asString(entry);
+        if (next) values.push(next);
+      }
+    }
+    return [{ name, values }];
+  });
+}
+
+function findCatalogEntry(catalog: CharacteristicCatalogEntry[], ...names: string[]) {
+  const wanted = names.map(normalizeCharacteristicKey);
+  return (
+    catalog.find((entry) => {
+      const key = normalizeCharacteristicKey(entry.name);
+      if (wanted.includes(key)) return true;
+      if (wanted.some((name) => name.startsWith("manufactur")) && key.startsWith("manufactur")) {
+        return true;
+      }
+      return false;
+    }) ?? null
+  );
+}
+
+function manufacturerCharacteristicKey(
+  obj: Record<string, unknown>,
+  catalog: CharacteristicCatalogEntry[],
+) {
+  return (
+    findCatalogEntry(catalog, "manufacturerName", "Manufacturer", "Manufacture")?.name ??
+    (obj.manufacturerName != null ? "manufacturerName" : null) ??
+    (obj.Manufacture != null ? "Manufacture" : null) ??
+    (obj.Manufacturer != null ? "Manufacturer" : null) ??
+    "manufacturerName"
+  );
+}
+
+function caliberCharacteristicKey(
+  obj: Record<string, unknown>,
+  catalog: CharacteristicCatalogEntry[],
+) {
+  return (
+    findCatalogEntry(catalog, "Caliber", "Gauge", "calibre")?.name ??
+    (obj.Caliber != null ? "Caliber" : null) ??
+    (obj.Gauge != null ? "Gauge" : null) ??
+    "Caliber"
+  );
+}
+
+function roundsCharacteristicKey(
+  obj: Record<string, unknown>,
+  catalog: CharacteristicCatalogEntry[],
+) {
+  return (
+    findCatalogEntry(
+      catalog,
+      "NumberOfRoundsPerQuantityOne",
+      "NumberOfRoundsForSale",
+      "NumberOfRounds",
+      "Rounds",
+    )?.name ??
+    (obj.NumberOfRoundsForSale != null ? "NumberOfRoundsForSale" : null) ??
+    "NumberOfRoundsPerQuantityOne"
+  );
+}
+
+function matchCatalogValue(wanted: string, values: string[], allowOther: boolean) {
+  const needle = normalizeCharacteristicValue(wanted);
+  if (!needle) return null;
+  const exact = values.find((value) => normalizeCharacteristicValue(value) === needle);
+  if (exact) return exact;
+  const partial = values
+    .filter((value) => {
+      const hay = normalizeCharacteristicValue(value);
+      if (hay.length < 2 || needle.length < 2) return false;
+      return hay.includes(needle) || needle.includes(hay);
+    })
+    .sort((left, right) => left.length - right.length);
+  if (partial[0]) return partial[0];
+  if (allowOther) {
+    return values.find((value) => /^other$/i.test(value.trim())) ?? null;
+  }
+  return null;
+}
+
+function characteristicsAsObject(raw: unknown): Record<string, unknown> {
+  if (Array.isArray(raw)) {
+    const obj: Record<string, unknown> = {};
+    for (const entry of raw) {
+      if (!entry || typeof entry !== "object") continue;
+      const record = entry as Record<string, unknown>;
+      const name = asString(
+        pickField(
+          record,
+          "characteristicName",
+          "CharacteristicName",
+          "name",
+          "Name",
+          "attributeName",
+          "AttributeName",
+          "key",
+          "Key",
+        ),
+      );
+      const value =
+        characteristicDisplayValue(
+          pickField(
+            record,
+            "characteristicValue",
+            "CharacteristicValue",
+            "selectedValue",
+            "SelectedValue",
+            "value",
+            "Value",
+          ),
+        ) ?? asString(pickField(record, "value", "Value"));
+      if (name && value) obj[name] = value;
+    }
+    return obj;
+  }
+  if (raw && typeof raw === "object") return { ...(raw as Record<string, unknown>) };
+  return {};
+}
+
+function caliberGuesses(wanted: string) {
+  const trimmed = wanted.trim();
+  const normalized = normalizeCharacteristicValue(trimmed);
+  if (normalized.includes("4570")) {
+    return [".45-70 GOVT", ".45-70 GOV'T", "45-70 GOVT", ".45-70", "45-70"];
+  }
+  if (normalized.includes("4440") || normalized.includes("4440win")) {
+    return [".44-40 WIN", ".44-40", "44-40", "44-40 Win"];
+  }
+  if (normalized.includes("44mag")) {
+    return [".44 MAG.", ".44 Mag.", "44 Mag", "44 MAG"];
+  }
+  if (normalized.includes("380acp") || normalized === "380") {
+    return [".380 ACP", "380 ACP", ".380 AUTO", "380 AUTO"];
+  }
+  if (normalized.includes("9mm") || normalized.includes("9mmluger")) {
+    return ["9MM LUGER", "9mm Luger", "9MM", "9mm"];
+  }
+  const guesses = [trimmed];
+  if (!trimmed.startsWith(".")) guesses.push(`.${trimmed}`);
+  return [...new Set(guesses)];
+}
+
+function resolveCaliberForGunBroker(
+  obj: Record<string, unknown>,
+  wanted: string | null,
+  catalog: CharacteristicCatalogEntry[],
+) {
+  if (!wanted) return asString(obj.Caliber) ?? asString(obj.Gauge);
+  const catalogValues = findCatalogEntry(catalog, "Caliber", "Gauge", "calibre")?.values ?? [];
+  const fromCatalog = matchCatalogValue(wanted, catalogValues, true);
+  if (fromCatalog) return fromCatalog;
+  const needle = normalizeCharacteristicValue(wanted);
+  if (needle) {
+    for (const value of Object.values(obj)) {
+      const text = asString(value);
+      if (!text) continue;
+      const hay = normalizeCharacteristicValue(text);
+      if (!hay) continue;
+      if (hay === needle || hay.includes(needle) || needle.includes(hay)) return text;
+    }
+  }
+  return caliberGuesses(wanted)[0] ?? wanted;
+}
+
 function overlayCharacteristics(
   raw: unknown,
   overlay: {
@@ -1298,41 +1723,71 @@ function overlayCharacteristics(
     caliber: string | null;
     rounds: number | null;
   },
+  catalog: CharacteristicCatalogEntry[] = [],
 ) {
-  const setObject = (target: Record<string, unknown>) => {
-    if (overlay.manufacturer) target.Manufacturer = overlay.manufacturer;
-    if (overlay.caliber) target.Caliber = overlay.caliber;
-    if (overlay.rounds != null) target.NumberOfRoundsPerQuantityOne = overlay.rounds;
-    return target;
-  };
-  if (Array.isArray(raw)) {
-    const next = raw.filter((entry) => entry && typeof entry === "object") as Record<
-      string,
-      unknown
-    >[];
-    const setAttr = (name: string, value: unknown) => {
-      const wanted = name.toLowerCase();
-      const index = next.findIndex((entry) => {
-        const entryName = asString(
-          pickField(entry, "name", "Name", "attributeName", "AttributeName", "key", "Key"),
-        );
-        return entryName?.toLowerCase() === wanted;
-      });
-      if (index >= 0) {
-        next[index] = { ...next[index], Value: value, value };
-        return;
-      }
-      next.push({ Name: name, Value: value });
-    };
-    if (overlay.manufacturer) setAttr("Manufacturer", overlay.manufacturer);
-    if (overlay.caliber) setAttr("Caliber", overlay.caliber);
-    if (overlay.rounds != null) setAttr("NumberOfRoundsPerQuantityOne", overlay.rounds);
-    return next.length ? next : null;
+  const obj = characteristicsAsObject(raw);
+  const manufactureEntry = findCatalogEntry(
+    catalog,
+    "manufacturerName",
+    "Manufacturer",
+    "Manufacture",
+  );
+  const caliberEntry = findCatalogEntry(catalog, "Caliber", "Gauge", "calibre");
+  if (overlay.manufacturer) {
+    for (const key of ["manufacturerName", "Manufacture", "manufacture", "Manufacturer", "manufacturer"]) {
+      delete obj[key];
+    }
+    const matched = matchCatalogValue(
+      overlay.manufacturer,
+      manufactureEntry?.values ?? [],
+      false,
+    );
+    const resolved = matched ?? OTHER_MANUFACTURER;
+    const key = manufactureEntry?.name ?? manufacturerCharacteristicKey(obj, catalog);
+    obj[key] = resolved;
   }
-  const obj =
-    raw && typeof raw === "object" ? { ...(raw as Record<string, unknown>) } : {};
-  setObject(obj);
+  if (overlay.caliber) {
+    for (const key of ["Caliber", "caliber", "Gauge", "gauge"]) {
+      delete obj[key];
+    }
+    const resolved = resolveCaliberForGunBroker(obj, overlay.caliber, catalog);
+    const key = caliberEntry?.name ?? caliberCharacteristicKey(obj, catalog);
+    obj[key] = resolved;
+  }
+  if (overlay.rounds != null) {
+    const key = roundsCharacteristicKey(obj, catalog);
+    obj[key] = overlay.rounds;
+    obj.NumberOfRoundsPerQuantityOne = overlay.rounds;
+    if (key === "NumberOfRoundsForSale" || obj.NumberOfRoundsForSale != null) {
+      obj.NumberOfRoundsForSale = overlay.rounds;
+    }
+  }
   return Object.keys(obj).length ? obj : null;
+}
+
+function applyCharacteristicsOnBody(
+  body: Record<string, unknown>,
+  raw: unknown,
+  overlay: {
+    manufacturer: string | null;
+    caliber: string | null;
+    rounds: number | null;
+  },
+  catalog: CharacteristicCatalogEntry[] = [],
+) {
+  const obj = overlayCharacteristics(raw, overlay, catalog);
+  if (!obj) return;
+  body.Characteristics = obj;
+  body.HasCharacteristics = true;
+  if (obj.NumberOfRoundsPerQuantityOne != null) {
+    body.NumberOfRoundsPerQuantityOne = obj.NumberOfRoundsPerQuantityOne;
+  }
+}
+
+function setRoundsOnBody(body: Record<string, unknown>, rounds: number | null) {
+  if (rounds == null) return;
+  body.NumberOfRoundsPerQuantityOne = rounds;
+  body.NumberOfRounds = rounds;
 }
 
 function clonePayload(
@@ -1368,7 +1823,14 @@ function clonePayload(
     sku?: string | null;
     upc?: string | null;
     pictureUrls?: string[] | null;
+    manufacturer?: string | null;
+    caliber?: string | null;
+    rounds?: number | null;
+    mfgPartNumber?: string | null;
+    serialNumber?: string | null;
+    gtin?: string | null;
   },
+  catalog: CharacteristicCatalogEntry[] = [],
 ) {
   const isFixedPrice = isFixedPriceOf(item);
   const source =
@@ -1379,10 +1841,27 @@ function clonePayload(
   const sourceFlags = itemFlagsFromItem(source);
   const details = itemDetailsFromItem(item);
   const sourceDetails = itemDetailsFromItem(source);
-  const manufacturer =
+  const useWooDetails = Boolean(overlay && "manufacturer" in overlay);
+  const templateManufacturer =
     details.manufacturer ?? sourceDetails.manufacturer ?? stored.manufacturer;
-  const caliber = details.caliber ?? sourceDetails.caliber ?? stored.caliber;
-  const rounds = details.rounds ?? sourceDetails.rounds ?? stored.rounds;
+  const templateCaliber = details.caliber ?? sourceDetails.caliber ?? stored.caliber;
+  const templateRounds = details.rounds ?? sourceDetails.rounds ?? stored.rounds;
+  const templateGtin = details.gtin ?? sourceDetails.gtin ?? stored.gtin;
+  const templateMfgPartNumber =
+    details.mfgPartNumber ?? sourceDetails.mfgPartNumber ?? stored.mfgPartNumber;
+  const templateSerialNumber =
+    details.serialNumber ?? sourceDetails.serialNumber ?? stored.serialNumber;
+  const pickOverlayText = (
+    overlayValue: string | null | undefined,
+    fallback: string | null,
+  ) => {
+    if (!useWooDetails) return fallback;
+    const trimmed = overlayValue?.trim();
+    return trimmed || fallback;
+  };
+  const manufacturer = pickOverlayText(overlay?.manufacturer, templateManufacturer);
+  const caliber = pickOverlayText(overlay?.caliber, templateCaliber);
+  const rounds = useWooDetails ? overlay?.rounds ?? templateRounds : templateRounds;
   const allowedDurations = isFixedPrice
     ? [1, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 30, 60, 90]
     : [1, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14];
@@ -1425,26 +1904,36 @@ function clonePayload(
   setIfPresent(
     body,
     "GTIN",
-    details.gtin ?? sourceDetails.gtin ?? stored.gtin ?? copyValue(item, "gtin", "GTIN"),
+    useWooDetails
+      ? pickOverlayText(overlay?.gtin, templateGtin)
+      : templateGtin ?? copyValue(item, "gtin", "GTIN"),
   );
   setIfPresent(
     body,
     "MfgPartNumber",
-    details.mfgPartNumber ??
-      sourceDetails.mfgPartNumber ??
-      stored.mfgPartNumber ??
-      copyValue(item, "mfgPartNumber", "MfgPartNumber", "mpn", "MPN"),
+    useWooDetails
+      ? pickOverlayText(overlay?.mfgPartNumber, templateMfgPartNumber)
+      : templateMfgPartNumber ??
+        copyValue(item, "mfgPartNumber", "MfgPartNumber", "mpn", "MPN"),
   );
   setIfPresent(
     body,
     "SerialNumber",
-    details.serialNumber ??
-      sourceDetails.serialNumber ??
-      stored.serialNumber ??
-      copyValue(item, "serialNumber", "SerialNumber"),
+    useWooDetails
+      ? pickOverlayText(overlay?.serialNumber, templateSerialNumber)
+      : templateSerialNumber ?? copyValue(item, "serialNumber", "SerialNumber"),
   );
   setIfPresent(body, "Manufacturer", manufacturer);
+  setIfPresent(body, "Manufacture", manufacturer);
   setIfPresent(body, "Caliber", caliber);
+  setRoundsOnBody(body, rounds ?? null);
+  applyCharacteristicsOnBody(
+    body,
+    copyValue(item, "characteristics", "Characteristics", "itemCharacteristics", "ItemCharacteristics") ??
+      copyValue(source, "characteristics", "Characteristics", "itemCharacteristics", "ItemCharacteristics"),
+    { manufacturer, caliber, rounds },
+    catalog,
+  );
   const inspectionPeriod =
     flags.inspectionPeriod ??
     sourceFlags.inspectionPeriod ??
@@ -1471,12 +1960,6 @@ function clonePayload(
   }
   body.PaymentMethods = paymentMethodsForApi(paymentMethods);
   setIfPresent(body, "PaymentPlan", asEnumId(copyValue(source, "paymentPlan", "PaymentPlan")));
-  const characteristics = overlayCharacteristics(
-    copyValue(item, "characteristics", "Characteristics") ??
-      copyValue(source, "characteristics", "Characteristics"),
-    { manufacturer, caliber, rounds },
-  );
-  setIfPresent(body, "Characteristics", characteristics);
   const autoRelist =
     details.autoRelist ?? sourceDetails.autoRelist ?? stored.autoRelist;
   setIfPresent(body, "AutoRelist", autoRelist);
@@ -1566,9 +2049,6 @@ export async function deleteGunBrokerListing(userId: string, itemId: string) {
   const existing = await prisma.listing.findUnique({
     where: { userId_itemId: { userId, itemId } },
   });
-  if (!existing) {
-    throw new Error("That listing is not in your inventory.");
-  }
 
   await withGunBrokerAccess(userId, async (accessToken) => {
     try {
@@ -1579,8 +2059,112 @@ export async function deleteGunBrokerListing(userId: string, itemId: string) {
     }
   });
 
-  await prisma.listing.delete({
+  if (existing) {
+    await prisma.listing.delete({
+      where: { userId_itemId: { userId, itemId } },
+    });
+  }
+}
+
+export async function liveCatalogFields(userId: string, itemId: string) {
+  return withGunBrokerAccess(userId, async (accessToken) => {
+    const live = await getItem(accessToken, itemId).catch(() => null);
+    const details = itemDetailsFromItem(live);
+    return {
+      manufacturer: details.manufacturer,
+      caliber: details.caliber,
+      rounds: details.rounds,
+    };
+  });
+}
+
+export async function patchListingCatalogFields(
+  userId: string,
+  itemId: string,
+  fields: {
+    manufacturer?: string | null;
+    caliber?: string | null;
+    rounds?: number | null;
+    upc?: string | null;
+    gtin?: string | null;
+    mfgPartNumber?: string | null;
+    serialNumber?: string | null;
+  },
+) {
+  const existing = await prisma.listing.findUnique({
     where: { userId_itemId: { userId, itemId } },
+  });
+  if (!existing) return;
+
+  const manufacturer = fields.manufacturer?.trim() || null;
+  const caliber = fields.caliber?.trim() || null;
+  const rounds = fields.rounds ?? null;
+  const upc = fields.upc?.trim() || null;
+  const gtin = fields.gtin?.trim() || null;
+  const mfgPartNumber = fields.mfgPartNumber?.trim() || null;
+  const serialNumber = fields.serialNumber?.trim() || null;
+
+  const body: Record<string, unknown> = {};
+  if (manufacturer) {
+    body.Manufacturer = manufacturer;
+  }
+  if (caliber) body.Caliber = caliber;
+  setRoundsOnBody(body, rounds);
+  if (upc) body.UPC = upc;
+  if (gtin) body.GTIN = gtin;
+  if (mfgPartNumber) body.MfgPartNumber = mfgPartNumber;
+  if (serialNumber) body.SerialNumber = serialNumber;
+  if (manufacturer || caliber || rounds != null) {
+    const liveItem = await withGunBrokerAccess(userId, async (accessToken) =>
+      getItem(accessToken, itemId).catch(() => null),
+    );
+    const categoryId = asEnumId(
+      pickField(liveItem, "categoryID", "CategoryID", "categoryId"),
+    );
+    const catalog = categoryId
+      ? await withGunBrokerAccess(userId, async (accessToken) =>
+          parseCharacteristicCatalog(
+            await getCategoryCharacteristics(accessToken, categoryId).catch(() => []),
+          ),
+        )
+      : [];
+    applyCharacteristicsOnBody(
+      body,
+      copyValue(liveItem, "characteristics", "Characteristics", "itemCharacteristics", "ItemCharacteristics"),
+      {
+        manufacturer: manufacturer ?? existing.manufacturer,
+        caliber: caliber ?? existing.caliber,
+        rounds: rounds ?? existing.rounds,
+      },
+      catalog,
+    );
+  }
+  if (Object.keys(body).length === 0) return;
+
+  const verifiedManufacturer = await withGunBrokerAccess(userId, async (accessToken) => {
+    await updateItemRespectingManufacturer(accessToken, itemId, body);
+    if (!manufacturer) return existing.manufacturer;
+    const live = await getItem(accessToken, itemId).catch(() => null);
+    const verified = await fallbackManufacturerIfUnset(
+      accessToken,
+      itemId,
+      live,
+      caliber ?? existing.caliber,
+    );
+    return readManufacturer(verified);
+  });
+
+  await prisma.listing.update({
+    where: { userId_itemId: { userId, itemId } },
+    data: {
+      manufacturer: verifiedManufacturer ?? (manufacturer ? OTHER_MANUFACTURER : existing.manufacturer),
+      caliber: caliber ?? existing.caliber,
+      rounds: rounds ?? existing.rounds,
+      upc: upc ?? existing.upc,
+      gtin: gtin ?? existing.gtin,
+      mfgPartNumber: mfgPartNumber ?? existing.mfgPartNumber,
+      serialNumber: serialNumber ?? existing.serialNumber,
+    },
   });
 }
 
@@ -1592,6 +2176,12 @@ export async function cloneGunBrokerListing(
     preferredDescription?: string | null;
     preferredSku?: string | null;
     preferredUpc?: string | null;
+    preferredGtin?: string | null;
+    preferredManufacturer?: string | null;
+    preferredCaliber?: string | null;
+    preferredRounds?: number | null;
+    preferredMfgPartNumber?: string | null;
+    preferredSerialNumber?: string | null;
     preferredPictureUrls?: string[] | null;
   },
 ) {
@@ -1603,13 +2193,30 @@ export async function cloneGunBrokerListing(
   }
 
   const title = cloneTitle(existing.title, options?.preferredTitle);
-  const overlay =
-    options && "preferredDescription" in options
+  const hasWooOverlay =
+    options &&
+    ("preferredManufacturer" in options ||
+      "preferredCaliber" in options ||
+      "preferredRounds" in options ||
+      "preferredDescription" in options ||
+      "preferredSku" in options ||
+      "preferredUpc" in options ||
+      "preferredGtin" in options ||
+      "preferredMfgPartNumber" in options ||
+      "preferredSerialNumber" in options ||
+      "preferredPictureUrls" in options);
+  const overlay = hasWooOverlay
       ? {
           description: options.preferredDescription,
           sku: options.preferredSku,
           upc: options.preferredUpc,
           pictureUrls: options.preferredPictureUrls,
+          manufacturer: options.preferredManufacturer,
+          caliber: options.preferredCaliber,
+          rounds: options.preferredRounds,
+          mfgPartNumber: options.preferredMfgPartNumber,
+          serialNumber: options.preferredSerialNumber,
+          gtin: options.preferredGtin,
         }
       : undefined;
   const created = await withGunBrokerAccess(userId, async (accessToken) => {
@@ -1627,45 +2234,50 @@ export async function cloneGunBrokerListing(
         ? [{ url: existing.thumbnailUrl, pictureId: null, displayOrder: 1 }]
         : [],
     );
-    const payload = await createItem(
-      accessToken,
-      clonePayload(
-        item,
-        pictures,
-        [defaults, account, contact],
-        title,
-        {
-          paymentMethods: parsePaymentMethods(existing.paymentMethodsJson),
-          whoPaysForShipping: existing.whoPaysForShipping,
-          shippingProfileId: existing.shippingProfileId,
-          shippingClasses: parseShippingClasses(existing.shippingClassesJson),
-          shippingClassCosts: parseShippingClassCosts(existing.shippingClassCostsJson),
-          condition: existing.condition,
-          isFflRequired: existing.isFflRequired,
-          weight: existing.weight,
-          weightUnit: existing.weightUnit,
-          inspectionPeriod: existing.inspectionPeriod,
-          manufacturer: existing.manufacturer,
-          caliber: existing.caliber,
-          rounds: existing.rounds,
-          mfgPartNumber: existing.mfgPartNumber,
-          serialNumber: existing.serialNumber,
-          gtin: existing.gtin,
-          excludeStates: parseExcludeStates(existing.excludeStates),
-          listingDuration: existing.listingDuration,
-          autoRelist: existing.autoRelist,
-          autoRelistFixedCount: existing.autoRelistFixedCount,
-          premiumFeatures: parsePremiumFeatures(existing.premiumFeaturesJson),
-        },
-        overlay,
-      ),
+    const categoryId = asEnumId(pickField(item, "categoryID", "CategoryID", "categoryId"));
+    const catalog = categoryId
+      ? parseCharacteristicCatalog(
+          await getCategoryCharacteristics(accessToken, categoryId).catch(() => []),
+        )
+      : [];
+    const requestBody = clonePayload(
+      item,
+      pictures,
+      [defaults, account, contact],
+      title,
+      {
+        paymentMethods: parsePaymentMethods(existing.paymentMethodsJson),
+        whoPaysForShipping: existing.whoPaysForShipping,
+        shippingProfileId: existing.shippingProfileId,
+        shippingClasses: parseShippingClasses(existing.shippingClassesJson),
+        shippingClassCosts: parseShippingClassCosts(existing.shippingClassCostsJson),
+        condition: existing.condition,
+        isFflRequired: existing.isFflRequired,
+        weight: existing.weight,
+        weightUnit: existing.weightUnit,
+        inspectionPeriod: existing.inspectionPeriod,
+        manufacturer: existing.manufacturer,
+        caliber: existing.caliber,
+        rounds: existing.rounds,
+        mfgPartNumber: existing.mfgPartNumber,
+        serialNumber: existing.serialNumber,
+        gtin: existing.gtin,
+        excludeStates: parseExcludeStates(existing.excludeStates),
+        listingDuration: existing.listingDuration,
+        autoRelist: existing.autoRelist,
+        autoRelistFixedCount: existing.autoRelistFixedCount,
+        premiumFeatures: parsePremiumFeatures(existing.premiumFeaturesJson),
+      },
+      overlay,
+      catalog,
     );
-    const newItemId = newItemIdFrom(payload);
-    if (!newItemId) {
-      throw new Error("GunBroker listed the clone but did not return a new item number.");
-    }
-    const createdItem = await getItem(accessToken, newItemId).catch(() => null);
-    return { newItemId, createdItem, pictures };
+    const created = await createItemForClone(accessToken, requestBody);
+    return {
+      newItemId: created.newItemId,
+      createdItem: created.createdItem,
+      sent: sentCharacteristicValues(requestBody),
+      pictures,
+    };
   });
 
   const mapped = created.createdItem ? mapSummary(created.createdItem) : null;
@@ -1676,6 +2288,24 @@ export async function cloneGunBrokerListing(
   const sku = overlay?.sku ?? existing.sku;
   const upc = overlay?.upc ?? existing.upc;
   const thumbnailUrl = overlay?.pictureUrls?.[0] ?? existing.thumbnailUrl;
+  const liveDetails = created.createdItem ? itemDetailsFromItem(created.createdItem) : null;
+  const manufacturer =
+    liveDetails?.manufacturer ??
+    created.sent.manufacturer ??
+    (overlay && overlay.manufacturer ? OTHER_MANUFACTURER : existing.manufacturer);
+  const caliber =
+    liveDetails?.caliber ??
+    created.sent.caliber ??
+    (overlay && "caliber" in overlay ? overlay.caliber : existing.caliber);
+  const rounds =
+    liveDetails?.rounds ??
+    created.sent.rounds ??
+    (overlay && "rounds" in overlay ? overlay.rounds : existing.rounds);
+  const mfgPartNumber =
+    overlay && "mfgPartNumber" in overlay ? overlay.mfgPartNumber : existing.mfgPartNumber;
+  const serialNumber =
+    overlay && "serialNumber" in overlay ? overlay.serialNumber : existing.serialNumber;
+  const gtin = overlay && "gtin" in overlay ? overlay.gtin : existing.gtin;
   if (mapped) {
     await persistMapped(userId, {
       ...mapped,
@@ -1684,6 +2314,12 @@ export async function cloneGunBrokerListing(
       sku: sku ?? mapped.sku,
       upc: upc ?? mapped.upc,
       thumbnailUrl: thumbnailUrl ?? mapped.thumbnailUrl,
+      manufacturer: manufacturer ?? mapped.manufacturer,
+      caliber: caliber ?? mapped.caliber,
+      rounds: rounds ?? mapped.rounds,
+      mfgPartNumber: mfgPartNumber ?? mapped.mfgPartNumber,
+      serialNumber: serialNumber ?? mapped.serialNumber,
+      gtin: gtin ?? mapped.gtin,
     });
     return mapped.itemId;
   }
@@ -1726,12 +2362,12 @@ export async function cloneGunBrokerListing(
     weight: existing.weight,
     weightUnit: existing.weightUnit,
     inspectionPeriod: existing.inspectionPeriod,
-    manufacturer: existing.manufacturer,
-    caliber: existing.caliber,
-    rounds: existing.rounds,
-    mfgPartNumber: existing.mfgPartNumber,
-    serialNumber: existing.serialNumber,
-    gtin: existing.gtin,
+    manufacturer: manufacturer ?? null,
+    caliber: caliber ?? null,
+    rounds: rounds ?? null,
+    mfgPartNumber: mfgPartNumber ?? null,
+    serialNumber: serialNumber ?? null,
+    gtin: gtin ?? null,
     excludeStates: parseExcludeStates(existing.excludeStates),
     listingDuration: existing.listingDuration,
     autoRelist: existing.autoRelist,

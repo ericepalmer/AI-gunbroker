@@ -201,6 +201,66 @@ export async function listItemsSelling(
   }
 }
 
+/** GunBroker TimeFrame: 7 = CreatedLast90Days */
+export const ORDERS_SOLD_TIMEFRAME_90_DAYS = 7;
+
+export async function listOrdersSold(
+  accessToken: string,
+  pageIndex: number,
+  pageSize = 300,
+  options?: {
+    orderStatus?: number;
+    timeFrame?: number;
+  },
+) {
+  const orderStatus = options?.orderStatus ?? 0;
+  const timeFrame = options?.timeFrame ?? ORDERS_SOLD_TIMEFRAME_90_DAYS;
+  const query = {
+    PageIndex: pageIndex,
+    PageSize: pageSize,
+    OrderStatus: orderStatus,
+    TimeFrame: timeFrame,
+    Sort: 3,
+    SortOrder: 1,
+  };
+  try {
+    const payload = await gunBrokerRequest({
+      path: "/OrdersSold",
+      accessToken,
+      query,
+    });
+    const results = asList(payload);
+    return {
+      count: asCount(payload, results.length),
+      pageIndex,
+      pageSize,
+      results,
+    };
+  } catch (error) {
+    if (error instanceof GunBrokerApiError && error.status === 401) throw error;
+    if (pageIndex !== 1) throw error;
+    const payload = await gunBrokerRequest({
+      path: "/OrdersSold",
+      accessToken,
+      query: { OrderStatus: orderStatus, TimeFrame: timeFrame, Sort: 3, SortOrder: 1 },
+    });
+    const results = asList(payload);
+    return {
+      count: asCount(payload, results.length),
+      pageIndex: 1,
+      pageSize: results.length || pageSize,
+      results,
+    };
+  }
+}
+
+export async function getOrder(accessToken: string, orderId: string) {
+  return gunBrokerRequest({
+    path: `/Orders/${encodeURIComponent(orderId)}`,
+    accessToken,
+  });
+}
+
 export async function getItem(accessToken: string, itemId: string) {
   return gunBrokerRequest({
     path: `/Items/${encodeURIComponent(itemId)}`,
@@ -265,6 +325,42 @@ export async function getListingDefaults(accessToken: string) {
     path: "/Listing/Defaults",
     accessToken,
   });
+}
+
+export async function getCategoryCharacteristics(accessToken: string, categoryId: number) {
+  const paths = [
+    `/Categories/${categoryId}/Characteristics`,
+    `/Items/Categories/${categoryId}/Characteristics`,
+    `/CategoryCharacteristics/${categoryId}`,
+  ];
+  for (const path of paths) {
+    try {
+      const payload = await gunBrokerRequest({ path, accessToken });
+      const list = characteristicsList(payload);
+      if (list.length) return list;
+    } catch {
+      // Try the next known GunBroker path.
+    }
+  }
+  return [];
+}
+
+function characteristicsList(payload: unknown): unknown[] {
+  const listed = asList(payload);
+  if (listed.length) return listed;
+  const nested = pickField(
+    payload,
+    "characteristics",
+    "Characteristics",
+    "categoryCharacteristics",
+    "CategoryCharacteristics",
+    "data",
+    "Data",
+    "values",
+    "Values",
+  );
+  if (Array.isArray(nested)) return nested;
+  return [];
 }
 
 export async function createItem(accessToken: string, data: Record<string, unknown>) {

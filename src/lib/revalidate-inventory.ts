@@ -8,4 +8,5 @@ export function revalidateInventoryPages() {
   revalidatePath("/app/inventory");
   revalidatePath(GUNBROKER_INVENTORY_PATH);
   revalidatePath(WOOCOMMERCE_INVENTORY_PATH);
+  revalidatePath(`${WOOCOMMERCE_INVENTORY_PATH}`, "layout");
 }

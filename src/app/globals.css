@@ -58,3 +58,12 @@ body::before {
   background: color-mix(in srgb, var(--accent) 40%, transparent);
   color: var(--foreground);
 }
+
+.sold-order-row[data-sold-order="unshipped"]:hover {
+  background-color: #e8edf5 !important;
+  border-color: #a8b4c8;
+}
+
+.sold-order-row[data-sold-order="shipped"]:hover {
+  border-color: #3a342b;
+}

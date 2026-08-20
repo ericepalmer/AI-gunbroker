@@ -877,16 +877,61 @@ export function parseRounds(value: unknown) {
   return Math.round(next);
 }
 
+function characteristicNameMatches(actual: string, wanted: string[]) {
+  const normalized = actual.toLowerCase().replace(/[^a-z0-9]/g, "");
+  if (!normalized) return false;
+  if (wanted.includes(normalized)) return true;
+  if (
+    wanted.some((name) => name.startsWith("manufactur")) &&
+    normalized.startsWith("manufactur")
+  ) {
+    return true;
+  }
+  if (wanted.includes("caliber") && (normalized === "caliber" || normalized === "gauge")) {
+    return true;
+  }
+  if (
+    wanted.some((name) => name.includes("round")) &&
+    (normalized.includes("round") || normalized.includes("cartridge"))
+  ) {
+    return true;
+  }
+  return false;
+}
+
+export function characteristicDisplayValue(value: unknown): string | null {
+  const named = asEnumName(value);
+  if (named) return named;
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    const record = value as Record<string, unknown>;
+    for (const [key, entry] of Object.entries(record)) {
+      if (!/^\d+$/.test(key)) continue;
+      const next = asString(entry);
+      if (next) return next;
+    }
+  }
+  return asString(value);
+}
+
 export function characteristicValue(source: unknown, ...names: string[]) {
   const wanted = names.map((name) => name.toLowerCase().replace(/[^a-z0-9]/g, ""));
   const visit = (value: unknown): unknown => {
     if (value == null) return undefined;
-    const direct = pickField(value, ...names);
-    if (direct != null) return direct;
+    const direct = pickField(
+      value,
+      ...names,
+      "manufacture",
+      "Manufacture",
+      "manufacturerName",
+      "ManufacturerName",
+    );
+    if (direct != null) return characteristicDisplayValue(direct) ?? direct;
     const nested = pickField(
       value,
       "characteristics",
       "Characteristics",
+      "itemCharacteristics",
+      "ItemCharacteristics",
       "itemAttributes",
       "ItemAttributes",
       "attributes",
@@ -896,16 +941,42 @@ export function characteristicValue(source: unknown, ...names: string[]) {
       for (const entry of nested) {
         if (!entry || typeof entry !== "object") continue;
         const name = asString(
-          pickField(entry, "name", "Name", "attributeName", "AttributeName", "key", "Key"),
+          pickField(
+            entry,
+            "characteristicName",
+            "CharacteristicName",
+            "name",
+            "Name",
+            "attributeName",
+            "AttributeName",
+            "key",
+            "Key",
+          ),
         );
-        const normalized = name?.toLowerCase().replace(/[^a-z0-9]/g, "") ?? "";
-        if (wanted.includes(normalized)) {
-          return pickField(entry, "value", "Value", "attributeValue", "AttributeValue");
-        }
+        if (!name || !characteristicNameMatches(name, wanted)) continue;
+        const raw = pickField(
+          entry,
+          "characteristicValue",
+          "CharacteristicValue",
+          "selectedValue",
+          "SelectedValue",
+          "value",
+          "Value",
+          "attributeValue",
+          "AttributeValue",
+        );
+        return characteristicDisplayValue(raw) ?? raw;
       }
       return undefined;
     }
-    if (nested && typeof nested === "object") return pickField(nested, ...names);
+    if (nested && typeof nested === "object") {
+      const fromObject =
+        characteristicDisplayValue(
+          pickField(nested, ...names, "manufacture", "Manufacture", "manufacturerName"),
+        ) ?? pickField(nested, ...names, "manufacture", "Manufacture", "manufacturerName");
+      if (fromObject != null) return fromObject;
+      return visit(nested);
+    }
     return undefined;
   };
   return visit(source);

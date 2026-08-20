@@ -3,7 +3,7 @@
 import { Info } from "lucide-react";
 
 const LINK_TOOLTIP =
-  "When linked, this product appears on your GunBroker inventory so you can list it there and keep quantities in sync.";
+  "Check to send this product to GunBroker. After it is linked, break the link from the GunBroker inventory page.";
 
 export const WOO_LINK_COLUMN_CLASS = "flex w-10 shrink-0 flex-col items-center justify-center";
 
@@ -50,7 +50,11 @@ export function WooLinkCheckbox({
         className="size-3.5 accent-[var(--accent)]"
         checked={checked}
         disabled={disabled}
-        aria-label={`Link ${productName} to GunBroker inventory`}
+        aria-label={
+          checked
+            ? `${productName} is linked. Break the link from GunBroker inventory.`
+            : `Link ${productName} to GunBroker inventory`
+        }
         onChange={(event) => onChange(event.target.checked)}
       />
     </div>

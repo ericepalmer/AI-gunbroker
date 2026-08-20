@@ -1,11 +1,21 @@
 import { inventoryThumbnailUrl } from "@/lib/inventory-image-url";
 import { INVENTORY_THUMB_BOX_CLASS } from "@/lib/inventory-layout";
 
-export function InventoryThumbnail({ url }: { url: string | null }) {
+export function InventoryThumbnail({
+  url,
+  size = "md",
+}: {
+  url: string | null;
+  size?: "sm" | "md";
+}) {
   const src = url ? inventoryThumbnailUrl(url) : null;
+  const boxClass =
+    size === "sm"
+      ? "relative h-12 w-12 shrink-0 overflow-hidden rounded-md border border-border bg-muted"
+      : INVENTORY_THUMB_BOX_CLASS;
 
   return (
-    <div className={INVENTORY_THUMB_BOX_CLASS}>
+    <div className={boxClass}>
       {src ? (
         <img
           src={src}

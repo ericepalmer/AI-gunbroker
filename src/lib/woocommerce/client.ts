@@ -1,4 +1,11 @@
 import { originFromUrl } from "@/lib/woocommerce/config";
+import { reportImportProgress, type ImportProgressHandler } from "@/lib/import-progress";
+import {
+  collectAttributes,
+  gunBrokerFieldsFromAttributes,
+  mergeAttributes,
+  type WooAttributeEntry,
+} from "@/lib/woocommerce/attributes";
 import {
   WooCommerceApiError,
   type WooCommerceSecrets,
@@ -26,6 +33,13 @@ export type WooProductRecord = {
   stockQuantity: number | null;
   thumbnailUrl: string | null;
   description: string | null;
+  manufacturer: string | null;
+  caliber: string | null;
+  rounds: number | null;
+  gtin: string | null;
+  mfgPartNumber: string | null;
+  serialNumber: string | null;
+  attributes: WooAttributeEntry[];
   categories: string[];
 };
 
@@ -159,6 +173,32 @@ function descriptionOf(record: Record<string, unknown>) {
   );
 }
 
+function coalesceProduct(child: WooProductRecord, parent: WooProductRecord | null): WooProductRecord {
+  if (!parent) return child;
+  const attributes = mergeAttributes(parent.attributes, child.attributes);
+  const description = child.description ?? parent.description;
+  const fields = gunBrokerFieldsFromAttributes(attributes, {
+    description,
+    upc: child.upc ?? parent.upc,
+  });
+  return {
+    ...child,
+    permalink: child.permalink ?? parent.permalink,
+    sku: child.sku ?? parent.sku,
+    upc: fields.upc ?? child.upc ?? parent.upc,
+    thumbnailUrl: child.thumbnailUrl ?? parent.thumbnailUrl,
+    description,
+    manufacturer: child.manufacturer ?? parent.manufacturer ?? fields.manufacturer,
+    caliber: child.caliber ?? parent.caliber ?? fields.caliber,
+    rounds: child.rounds ?? parent.rounds ?? fields.rounds,
+    gtin: child.gtin ?? parent.gtin ?? fields.gtin,
+    mfgPartNumber: child.mfgPartNumber ?? parent.mfgPartNumber ?? fields.mfgPartNumber,
+    serialNumber: child.serialNumber ?? parent.serialNumber ?? fields.serialNumber,
+    attributes,
+    categories: child.categories.length ? child.categories : parent.categories,
+  };
+}
+
 function mapProduct(item: unknown, fallbackParentId = 0): WooProductRecord | null {
   const record = asRecord(item);
   if (!record) return null;
@@ -166,6 +206,14 @@ function mapProduct(item: unknown, fallbackParentId = 0): WooProductRecord | nul
   const name = asString(record.name);
   if (productId == null || !name) return null;
   const parentId = asInt(record.parent_id) ?? asInt(record.parentId) ?? fallbackParentId;
+  const attributes = collectAttributes(record);
+  const description = descriptionOf(record);
+  const fields = gunBrokerFieldsFromAttributes(attributes, {
+    description,
+    upc: asString(record.upc),
+    globalUniqueId:
+      asString(record.global_unique_id) ?? asString(record.globalUniqueId),
+  });
   return {
     productId,
     parentId: parentId ?? 0,
@@ -173,7 +221,7 @@ function mapProduct(item: unknown, fallbackParentId = 0): WooProductRecord | nul
     slug: asString(record.slug),
     permalink: asString(record.permalink),
     sku: asString(record.sku),
-    upc: asString(record.global_unique_id) ?? asString(record.globalUniqueId),
+    upc: fields.upc,
     type: asString(record.type) ?? "simple",
     status: asString(record.status) ?? "publish",
     stockStatus: asString(record.stock_status) ?? asString(record.stockStatus) ?? "instock",
@@ -181,7 +229,14 @@ function mapProduct(item: unknown, fallbackParentId = 0): WooProductRecord | nul
     regularPrice: money(record.regular_price) ?? money(record.regularPrice),
     stockQuantity: asInt(record.stock_quantity) ?? asInt(record.stockQuantity),
     thumbnailUrl: firstImage(record.images),
-    description: descriptionOf(record),
+    description,
+    manufacturer: fields.manufacturer,
+    caliber: fields.caliber,
+    rounds: fields.rounds,
+    gtin: fields.gtin,
+    mfgPartNumber: fields.mfgPartNumber,
+    serialNumber: fields.serialNumber,
+    attributes,
     categories: categoriesOf(record.categories),
   };
 }
@@ -195,11 +250,15 @@ export async function pingWooCommerce(credentials: WooCommerceSecrets) {
   return { ok: true as const, storeUrl: first.storeUrl, total: first.total ?? 0 };
 }
 
-export async function listWooProducts(credentials: WooCommerceSecrets) {
+export async function listWooProducts(
+  credentials: WooCommerceSecrets,
+  onProgress?: ImportProgressHandler,
+) {
   const products: WooProductRecord[] = [];
   let page = 1;
   let storeUrl = credentials.storeUrl;
   let totalPages = 1;
+  let catalogTotal: number | null = null;
 
   while (page <= totalPages && page <= 50) {
     const result = await wooRequest<unknown>({
@@ -209,11 +268,17 @@ export async function listWooProducts(credentials: WooCommerceSecrets) {
     });
     storeUrl = result.storeUrl;
     totalPages = result.totalPages ?? 1;
+    if (result.total && result.total > 0) catalogTotal = result.total;
     const rows = Array.isArray(result.payload) ? result.payload : [];
     for (const row of rows) {
       const mapped = mapProduct(row);
       if (mapped) products.push(mapped);
     }
+    await reportImportProgress(onProgress, {
+      loaded: products.length,
+      total: catalogTotal,
+      phase: "loading",
+    });
     if (rows.length === 0) break;
     page += 1;
   }
@@ -236,16 +301,22 @@ export async function listWooProducts(credentials: WooCommerceSecrets) {
       for (const row of rows) {
         const mapped = mapProduct(row, product.productId);
         if (!mapped) continue;
-        expanded.push({
-          ...mapped,
-          type: "variation",
-          parentId: product.productId,
-          permalink: mapped.permalink ?? product.permalink,
-          thumbnailUrl: mapped.thumbnailUrl ?? product.thumbnailUrl,
-          description: mapped.description ?? product.description,
-          categories: mapped.categories.length ? mapped.categories : product.categories,
-        });
+        expanded.push(
+          coalesceProduct(
+            {
+              ...mapped,
+              type: "variation",
+              parentId: product.productId,
+            },
+            product,
+          ),
+        );
       }
+      await reportImportProgress(onProgress, {
+        loaded: expanded.length,
+        total: null,
+        phase: "loading",
+      });
       if (rows.length === 0) break;
       variationPage += 1;
     }
@@ -266,21 +337,16 @@ export async function getWooProduct(
         path: `/products/${parentId}/variations/${productId}`,
       });
       const mapped = mapProduct(variation.payload, parentId);
-      if (mapped?.description) return mapped;
-      const parent = await wooRequest<unknown>({
-        credentials: { ...credentials, storeUrl: variation.storeUrl },
-        path: `/products/${parentId}`,
-      });
-      const parentMapped = mapProduct(parent.payload);
+      const parentMapped = mapProduct(
+        (
+          await wooRequest<unknown>({
+            credentials: { ...credentials, storeUrl: variation.storeUrl },
+            path: `/products/${parentId}`,
+          })
+        ).payload,
+      );
       if (!mapped) return parentMapped;
-      return {
-        ...mapped,
-        description: mapped.description ?? parentMapped?.description ?? null,
-        thumbnailUrl: mapped.thumbnailUrl ?? parentMapped?.thumbnailUrl ?? null,
-        categories: mapped.categories.length
-          ? mapped.categories
-          : (parentMapped?.categories ?? []),
-      };
+      return coalesceProduct(mapped, parentMapped);
     } catch {
       // Fall through to the simple product endpoint.
     }

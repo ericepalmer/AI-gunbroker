@@ -144,11 +144,11 @@ export function InventoryCard({
         className={LINKED_CARD_CLASS}
         thumbnailUrl={listing.thumbnailUrl}
         title={listing.title}
+        href={href}
         editing={editing}
         pending={pending}
         onCommit={onCommit}
         onDiscard={resetFields}
-        onOpen={() => router.push(href)}
         qtyPrice={
           <>
             <label className="flex items-center gap-1 text-[10px] text-muted-foreground">

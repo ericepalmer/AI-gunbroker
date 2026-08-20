@@ -33,7 +33,7 @@ export default async function AppHomePage() {
             href: "/app/sold",
             title: "Sold / ship",
             body: "Closed orders from GunBroker into ShipStation.",
-            badge: "Planned",
+            badge: "Live",
           },
           {
             href: "/app/settings?tab=connections",

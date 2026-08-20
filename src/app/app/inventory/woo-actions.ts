@@ -4,7 +4,6 @@ import { getSession } from "@/lib/session";
 import {
   breakWooGunBrokerLink,
   linkWooProductToGunBroker,
-  setWooGunBrokerSource,
   setWooQuantitySource,
   type BreakWooLinkChoice,
 } from "@/lib/woocommerce/service";
@@ -36,9 +35,10 @@ export async function setWooSourceAction(productId: number, sourced: boolean) {
         alreadyLinked: linked.alreadyLinked,
       };
     }
-    await setWooGunBrokerSource(auth.userId, productId, false);
-    refreshInventory();
-    return { ok: true as const };
+    return {
+      ok: false as const,
+      error: "Break the WooCommerce link from the GunBroker inventory page.",
+    };
   } catch (error) {
     return {
       ok: false as const,

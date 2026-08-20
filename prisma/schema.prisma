@@ -25,6 +25,7 @@ model User {
   integrations Integration[]
   listings     Listing[]
   wooProducts  WooProduct[]
+  soldOrders   SoldOrder[]
 
   @@unique([email])
   @@map("user")
@@ -92,6 +93,7 @@ model Integration {
   externalUserId   String?
   externalUsername String?
   lastVerifiedAt   DateTime?
+  lastSyncedAt     DateTime?
   lastError        String?
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
@@ -173,6 +175,13 @@ model WooProduct {
   stockQuantity  Int?
   thumbnailUrl   String?
   description    String?
+  manufacturer   String?
+  caliber        String?
+  rounds         Int?
+  gtin           String?
+  mfgPartNumber  String?
+  serialNumber   String?
+  attributesJson String   @default("[]")
   categoriesJson String   @default("[]")
   sourceForGunBroker Boolean @default(false)
   linkedItemId   String?
@@ -201,4 +210,45 @@ model DevEmail {
 
   @@index([createdAt])
   @@map("dev_email")
+}
+
+model SoldOrder {
+  id               String    @id @default(cuid())
+  userId           String
+  orderId          String
+  orderStatus      Int       @default(0)
+  orderStatusLabel String?
+  itemShipped      Boolean   @default(false)
+  orderComplete    Boolean   @default(false)
+  buyerUsername    String?
+  buyerName        String?
+  orderDate        DateTime?
+  totalAmount      Float?
+  itemCount        Int       @default(1)
+  title            String?
+  thumbnailUrl     String?
+  itemIdsJson      String    @default("[]")
+  itemsJson        String    @default("[]")
+  shipToJson       String    @default("{}")
+  detailsJson      String    @default("{}")
+  trackingNumber       String?
+  carrier              String?
+  shipStationOrderId   String?
+  shipStationStatus    String?
+  shipStationSyncedAt  DateTime?
+  /// Buyer notified on GunBroker (complete / status 5). Independent of ShipStation shipped.
+  gunBrokerNotified    Boolean   @default(false)
+  workStatus           String    @default("pending")
+  completedAt          DateTime?
+  lastImportedAt       DateTime  @default(now())
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, orderId])
+  @@index([userId, workStatus])
+  @@index([userId, orderStatus])
+  @@index([userId, gunBrokerNotified])
+  @@map("sold_order")
 }

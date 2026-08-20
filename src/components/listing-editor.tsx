@@ -481,7 +481,7 @@ export function ListingEditor({ initial }: { initial: ListingDetail }) {
             />
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="listing-rounds">Rounds</Label>
+            <Label htmlFor="listing-rounds">Cartridges per box</Label>
             <Input
               id="listing-rounds"
               type="number"
@@ -496,7 +496,9 @@ export function ListingEditor({ initial }: { initial: ListingDetail }) {
                 );
               }}
             />
-            <p className="text-xs text-muted-foreground">For ammunition.</p>
+            <p className="text-xs text-muted-foreground">
+              Cartridges in one box or listing unit, not how many boxes you have.
+            </p>
           </div>
         </div>
         <div className="grid gap-3 md:grid-cols-3">

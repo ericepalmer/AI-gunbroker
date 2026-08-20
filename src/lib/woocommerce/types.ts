@@ -1,3 +1,5 @@
+import type { WooAttributeEntry, WooGunBrokerFields } from "@/lib/woocommerce/attributes";
+
 export type WooCommerceSecrets = {
   storeUrl: string;
   consumerKey: string;
@@ -24,6 +26,8 @@ export type WooKind =
   | "firearms"
   | "accessories"
   | "other";
+
+export type { WooAttributeEntry, WooGunBrokerFields };
 
 export type LinkedListingSummary = {
   itemId: string;
@@ -56,6 +60,20 @@ export type WooProductCard = {
   manualQuantity: number | null;
   listedOnStore: boolean;
   lastImportedAt: string;
+};
+
+export type WooProductDetail = WooProductCard & {
+  slug: string | null;
+  regularPrice: number | null;
+  description: string | null;
+  manufacturer: string | null;
+  caliber: string | null;
+  rounds: number | null;
+  gtin: string | null;
+  mfgPartNumber: string | null;
+  serialNumber: string | null;
+  attributes: WooAttributeEntry[];
+  gunBrokerFields: WooGunBrokerFields;
 };
 
 export type LinkableListing = {

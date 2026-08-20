@@ -17,16 +17,16 @@ import { cn } from "@/lib/utils";
 const links = [
   { href: "/app", label: "Overview", icon: LayoutDashboard, active: (p: string) => p === "/app" },
   {
-    href: GUNBROKER_INVENTORY_PATH,
-    label: "GunBroker inventory",
-    icon: Target,
-    active: isGunBrokerInventoryPath,
-  },
-  {
     href: WOOCOMMERCE_INVENTORY_PATH,
     label: "WooCommerce inventory",
     icon: Store,
     active: isWooCommerceInventoryPath,
+  },
+  {
+    href: GUNBROKER_INVENTORY_PATH,
+    label: "GunBroker inventory",
+    icon: Target,
+    active: isGunBrokerInventoryPath,
   },
   { href: "/app/sold", label: "Sold / ship", icon: Truck, active: (p: string) => p === "/app/sold" },
   {

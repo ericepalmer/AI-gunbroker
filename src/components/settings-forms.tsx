@@ -9,8 +9,10 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { GunBrokerSettings } from "@/components/gunbroker-settings";
+import { ShipStationSettings } from "@/components/shipstation-settings";
 import { WooCommerceSettings } from "@/components/woocommerce-settings";
 import type { GunBrokerStatus } from "@/lib/gunbroker/types";
+import type { ShipStationStatus } from "@/lib/shipstation/types";
 import type { WooCommerceStatus } from "@/lib/woocommerce/types";
 
 type SessionRow = {
@@ -318,31 +320,17 @@ export function SessionSettings({
 export function ConnectionSettings({
   gunbroker,
   woocommerce,
+  shipstation,
 }: {
   gunbroker: GunBrokerStatus;
   woocommerce: WooCommerceStatus;
+  shipstation: ShipStationStatus;
 }) {
   return (
     <div className="grid gap-4">
       <GunBrokerSettings initial={gunbroker} />
       <WooCommerceSettings initial={woocommerce} />
-      <Card>
-        <CardHeader>
-          <div className="flex items-center justify-between">
-            <CardTitle>ShipStation</CardTitle>
-            <Badge>Not connected</Badge>
-          </div>
-          <CardDescription>
-            API key so closed GunBroker orders become shipments. There is no native
-            GunBroker connector — Chamber is that bridge.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <Button type="button" variant="secondary" disabled>
-            Connect in a later build
-          </Button>
-        </CardContent>
-      </Card>
+      <ShipStationSettings initial={shipstation} />
     </div>
   );
 }

@@ -1,10 +1,14 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useLayoutEffect, useMemo, useState } from "react";
 import type { WooProductCard } from "@/lib/woocommerce/types";
 import { effectiveQuantity } from "@/lib/woocommerce/types";
 import { matchesWooKeyword } from "@/lib/woocommerce/classify";
-import { INVENTORY_KIND_FILTERS } from "@/lib/inventory-filters";
+import {
+  INVENTORY_KIND_FILTERS,
+  isInventoryKindFilterId,
+  type InventoryKindFilterId,
+} from "@/lib/inventory-filters";
 import { ShowZeroInventory } from "@/components/show-zero-inventory";
 import { WooInventoryCardRow } from "@/components/woo-inventory-card-row";
 import { WooLinkColumnHeader } from "@/components/woo-link-column";
@@ -47,10 +51,22 @@ function sectionGapFillers(count: number, keyBase: string) {
   return fillers;
 }
 
+const WOO_KIND_FILTER_KEY = "chamber.woocommerce.kindFilter";
+
 export function WooInventoryGrid({ products }: { products: WooProductCard[] }) {
   const [query, setQuery] = useState("");
-  const [kind, setKind] = useState<(typeof INVENTORY_KIND_FILTERS)[number]["id"]>("all");
+  const [kind, setKind] = useState<InventoryKindFilterId>("all");
   const [showZero, setShowZero] = useState(false);
+
+  useLayoutEffect(() => {
+    const stored = window.localStorage.getItem(WOO_KIND_FILTER_KEY);
+    if (stored && isInventoryKindFilterId(stored)) setKind(stored);
+  }, []);
+
+  function selectKind(next: InventoryKindFilterId) {
+    setKind(next);
+    window.localStorage.setItem(WOO_KIND_FILTER_KEY, next);
+  }
 
   const visible = useMemo(() => {
     return products.filter((product) => {
@@ -79,7 +95,7 @@ export function WooInventoryGrid({ products }: { products: WooProductCard[] }) {
               size="sm"
               variant={kind === filter.id ? "default" : "secondary"}
               className="h-7 px-2 text-xs"
-              onClick={() => setKind(filter.id)}
+              onClick={() => selectKind(filter.id)}
             >
               {filter.label}
             </Button>

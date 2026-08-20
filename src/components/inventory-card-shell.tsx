@@ -1,3 +1,6 @@
+"use client";
+
+import Link from "next/link";
 import { InventoryThumbnail } from "@/components/inventory-thumbnail";
 import { InventoryQuickEditActions } from "@/components/inventory-quick-edit-actions";
 import {
@@ -11,11 +14,11 @@ import type { ReactNode } from "react";
 export function InventoryCardShell({
   thumbnailUrl,
   title,
+  href,
   editing,
   pending,
   onCommit,
   onDiscard,
-  onOpen,
   qtyPrice,
   metadata,
   footer,
@@ -23,11 +26,11 @@ export function InventoryCardShell({
 }: {
   thumbnailUrl: string | null;
   title: string;
+  href?: string;
   editing?: boolean;
   pending?: boolean;
   onCommit?: () => void;
   onDiscard?: () => void;
-  onOpen?: () => void;
   qtyPrice: ReactNode;
   metadata: ReactNode;
   footer?: ReactNode;
@@ -36,26 +39,27 @@ export function InventoryCardShell({
   return (
     <article
       className={cn(
-        "w-full min-w-0 overflow-hidden rounded-lg border text-xs",
-        onOpen && "cursor-pointer",
+        "relative w-full min-w-0 overflow-hidden rounded-lg border text-xs",
+        href && "cursor-pointer",
         className,
       )}
-      onClick={(event) => {
-        if (!onOpen) return;
-        const target = event.target as HTMLElement;
-        if (target.closest("a, button, input, label, textarea, select")) return;
-        onOpen();
-      }}
     >
-      <div className={INVENTORY_CARD_BODY_CLASS}>
+      {href ? (
+        <Link
+          href={href}
+          className="absolute inset-0 z-0"
+          aria-label={`Open ${title}`}
+        />
+      ) : null}
+      <div className={cn(INVENTORY_CARD_BODY_CLASS, "pointer-events-none relative z-10")}>
         <InventoryThumbnail url={thumbnailUrl} />
         <div className={INVENTORY_CARD_MAIN_CLASS}>
           <h2 className="w-full truncate text-sm font-medium leading-tight" title={title}>
             {title}
           </h2>
           <div className={INVENTORY_CARD_SECOND_ROW_CLASS}>
-            <div className="flex shrink-0 items-center gap-2">{qtyPrice}</div>
-            <div className="min-w-0 flex-1 text-right text-[10px] leading-snug text-muted-foreground">
+            <div className="pointer-events-auto flex shrink-0 items-center gap-2">{qtyPrice}</div>
+            <div className="pointer-events-auto min-w-0 flex-1 text-right text-[10px] leading-snug text-muted-foreground">
               {editing && onCommit && onDiscard ? (
                 <div className="flex h-full items-center justify-end">
                   <InventoryQuickEditActions
@@ -72,7 +76,7 @@ export function InventoryCardShell({
         </div>
       </div>
       {footer ? (
-        <div className="flex flex-wrap items-center gap-1 border-t border-border/70 px-2 py-1">
+        <div className="relative z-10 flex flex-wrap items-center gap-1 border-t border-border/70 px-2 py-1">
           {footer}
         </div>
       ) : null}

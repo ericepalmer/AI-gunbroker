@@ -13,6 +13,12 @@ export const INVENTORY_KIND_FILTERS: { id: "all" | WooKind; label: string }[] = 
   { id: "accessories", label: "Accessories" },
 ];
 
+export type InventoryKindFilterId = (typeof INVENTORY_KIND_FILTERS)[number]["id"];
+
+export function isInventoryKindFilterId(value: string): value is InventoryKindFilterId {
+  return INVENTORY_KIND_FILTERS.some((filter) => filter.id === value);
+}
+
 export function inventoryItemKind(item: InventoryTabItem): WooKind {
   if (item.kind === "woo" || item.kind === "linked") {
     return item.product.kind;

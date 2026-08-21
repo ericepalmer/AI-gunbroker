@@ -10,9 +10,11 @@ import { formatElapsedSince } from "@/lib/sold-order-dates";
 export function UpdateShipStationButton({
   connected,
   lastSyncedAt,
+  idleLabel = "Update ShipStation",
 }: {
   connected: boolean;
   lastSyncedAt: string | null;
+  idleLabel?: string;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -52,7 +54,7 @@ export function UpdateShipStationButton({
       disabled={pending || !connected}
       className="h-auto flex-col gap-0.5 py-1.5 leading-tight"
     >
-      <span>{pending ? "Updating…" : "Update ShipStation"}</span>
+      <span>{pending ? "Updating…" : idleLabel}</span>
       <span className="text-[10px] font-normal opacity-80">
         {formatElapsedSince(lastSyncedAt)}
       </span>

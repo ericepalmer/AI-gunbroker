@@ -3,6 +3,7 @@ import { GunBrokerInventoryView } from "@/components/gunbroker-inventory-view";
 import { gunBrokerTabItems } from "@/components/inventory-grid";
 import { listLocalInventory } from "@/lib/gunbroker/listings";
 import { isGunBrokerConnected } from "@/lib/gunbroker/service";
+import { prisma } from "@/lib/prisma";
 import { getSession } from "@/lib/session";
 import { listLocalWooProducts } from "@/lib/woocommerce/service";
 import Link from "next/link";
@@ -10,17 +11,22 @@ import Link from "next/link";
 export default async function GunBrokerInventoryPage() {
   const session = await getSession();
   const userId = session!.user.id;
-  const [connected, listings, products] = await Promise.all([
+  const [connected, listings, products, latestImport] = await Promise.all([
     isGunBrokerConnected(userId),
     listLocalInventory(userId),
     listLocalWooProducts(userId),
+    prisma.listing.aggregate({
+      where: { userId },
+      _max: { lastImportedAt: true },
+    }),
   ]);
+  const lastSyncedAt = latestImport._max.lastImportedAt?.toISOString() ?? null;
 
   return (
     <div className="px-4 py-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="text-xs uppercase tracking-[0.2em] text-accent">GunBroker inventory</p>
-        <ImportInventoryButton connected={connected} />
+        <ImportInventoryButton connected={connected} lastSyncedAt={lastSyncedAt} />
       </div>
       {!connected ? (
         <p className="mt-4 text-xs text-muted-foreground">

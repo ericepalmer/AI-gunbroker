@@ -15,7 +15,7 @@ import { Logo } from "@/components/logo";
 import { cn } from "@/lib/utils";
 
 const links = [
-  { href: "/app", label: "Overview", icon: LayoutDashboard, active: (p: string) => p === "/app" },
+  { href: "/app", label: "Dashboard", icon: LayoutDashboard, active: (p: string) => p === "/app" },
   {
     href: WOOCOMMERCE_INVENTORY_PATH,
     label: "WooCommerce inventory",

@@ -11,12 +11,18 @@ export default async function WooCommerceInventoryPage() {
     isWooCommerceConnected(userId),
     listLocalWooProducts(userId),
   ]);
+  const lastSyncedAt =
+    products.reduce<string | null>((latest, product) => {
+      if (!product.lastImportedAt) return latest;
+      if (!latest || product.lastImportedAt > latest) return product.lastImportedAt;
+      return latest;
+    }, null) ?? null;
 
   return (
     <div className="px-4 py-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="text-xs uppercase tracking-[0.2em] text-accent">WooCommerce inventory</p>
-        <ImportStoreButton connected={connected} />
+        <ImportStoreButton connected={connected} lastSyncedAt={lastSyncedAt} />
       </div>
       {!connected ? (
         <p className="mt-4 text-xs text-muted-foreground">

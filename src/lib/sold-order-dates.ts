@@ -39,9 +39,10 @@ export function formatSoldAndShippedDates(
 export function formatElapsedSince(value: string | null) {
   if (!value) return "Never";
   const minutes = Math.max(0, Math.floor((Date.now() - new Date(value).getTime()) / 60_000));
-  if (minutes < 60) return minutes === 1 ? "1 minute" : `${minutes} minutes`;
+  if (minutes < 1) return "Just now";
+  if (minutes < 60) return minutes === 1 ? "1 minute ago" : `${minutes} minutes ago`;
   const hours = Math.floor(minutes / 60);
-  if (hours < 24) return hours === 1 ? "1 hour" : `${hours} hours`;
+  if (hours < 24) return hours === 1 ? "1 hour ago" : `${hours} hours ago`;
   const days = Math.floor(hours / 24);
-  return days === 1 ? "1 day" : `${days} days`;
+  return days === 1 ? "1 day ago" : `${days} days ago`;
 }

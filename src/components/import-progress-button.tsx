@@ -15,7 +15,7 @@ export function ImportProgressButton({
   idleLabel,
   sourceName,
   noun,
-  lastSyncedAt,
+  lastSyncedAt = null,
 }: {
   connected: boolean;
   endpoint: string;
@@ -69,11 +69,9 @@ export function ImportProgressButton({
       className={cn("h-auto flex-col gap-0.5 py-1.5 leading-tight")}
     >
       <span>{pending ? (progress ? formatImportProgress(progress) : "Importing…") : idleLabel}</span>
-      {lastSyncedAt !== undefined ? (
-        <span className="text-[10px] font-normal opacity-80">
-          {formatElapsedSince(lastSyncedAt)}
-        </span>
-      ) : null}
+      <span className="text-[10px] font-normal opacity-80">
+        {formatElapsedSince(lastSyncedAt)}
+      </span>
     </Button>
   );
 }

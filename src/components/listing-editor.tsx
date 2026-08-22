@@ -79,6 +79,8 @@ function editsFrom(listing: ListingDetail): ListingEdits {
     manufacturer: listing.manufacturer ?? "",
     caliber: listing.caliber ?? "",
     rounds: listing.rounds,
+    model: listing.model ?? "",
+    mount: listing.mount ?? "",
     mfgPartNumber: listing.mfgPartNumber ?? "",
     serialNumber: listing.serialNumber ?? "",
     gtin: listing.gtin ?? "",
@@ -399,7 +401,7 @@ export function ListingEditor({ initial }: { initial: ListingDetail }) {
         </div>
         <div className="grid gap-3 md:grid-cols-3">
           <div className="space-y-1.5">
-            <Label htmlFor="listing-condition">Condition</Label>
+            <Label htmlFor="listing-condition">Factory condition</Label>
             <select
               id="listing-condition"
               value={edits.condition ?? ""}
@@ -418,6 +420,15 @@ export function ListingEditor({ initial }: { initial: ListingDetail }) {
                 </option>
               ))}
             </select>
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="listing-mount">Mount</Label>
+            <Input
+              id="listing-mount"
+              value={edits.mount}
+              onChange={(event) => setField("mount", event.target.value)}
+              placeholder="e.g. 1/2x28 Direct Thread"
+            />
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="listing-weight">Weight</Label>
@@ -470,6 +481,14 @@ export function ListingEditor({ initial }: { initial: ListingDetail }) {
               id="listing-manufacturer"
               value={edits.manufacturer}
               onChange={(event) => setField("manufacturer", event.target.value)}
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="listing-model">Model</Label>
+            <Input
+              id="listing-model"
+              value={edits.model}
+              onChange={(event) => setField("model", event.target.value)}
             />
           </div>
           <div className="space-y-1.5">
@@ -693,7 +712,9 @@ export function ListingEditor({ initial }: { initial: ListingDetail }) {
               className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm text-foreground outline-none transition-colors focus:border-accent/70 focus:ring-2 focus:ring-ring/30"
             >
               <option value="">Auto-relist</option>
-              {AUTO_RELIST_OPTIONS.map((option) => (
+              {AUTO_RELIST_OPTIONS.filter((option) =>
+                snapshot.isFixedPrice ? option.value !== 2 : option.value !== 4,
+              ).map((option) => (
                 <option key={option.value} value={option.value}>
                   {option.label}
                 </option>

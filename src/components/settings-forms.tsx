@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { authClient } from "@/lib/auth-client";
 import { Button } from "@/components/ui/button";
@@ -326,11 +326,24 @@ export function ConnectionSettings({
   woocommerce: WooCommerceStatus;
   shipstation: ShipStationStatus;
 }) {
+  useEffect(() => {
+    const hash = window.location.hash.replace(/^#/, "");
+    if (!hash) return;
+    const el = document.getElementById(hash);
+    if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, []);
+
   return (
     <div className="grid gap-4">
-      <GunBrokerSettings initial={gunbroker} />
-      <WooCommerceSettings initial={woocommerce} />
-      <ShipStationSettings initial={shipstation} />
+      <div id="connection-gunbroker" className="scroll-mt-6">
+        <GunBrokerSettings initial={gunbroker} />
+      </div>
+      <div id="connection-woocommerce" className="scroll-mt-6">
+        <WooCommerceSettings initial={woocommerce} />
+      </div>
+      <div id="connection-shipstation" className="scroll-mt-6">
+        <ShipStationSettings initial={shipstation} />
+      </div>
     </div>
   );
 }

@@ -1,6 +1,6 @@
 import { Prisma, PrismaClient } from "@prisma/client";
 
-const PRISMA_CLIENT_REV = 27;
+const PRISMA_CLIENT_REV = 30;
 const WOO_CLIENT_SHAPE = Object.values(Prisma.WooProductScalarFieldEnum).sort().join(",");
 const SOLD_ORDER_SHAPE = Object.values(Prisma.SoldOrderScalarFieldEnum).sort().join(",");
 export const WOO_PRODUCT_HAS_ATTRIBUTES_JSON = "attributesJson" in Prisma.WooProductScalarFieldEnum;
@@ -31,7 +31,8 @@ function isCurrentClient(client: PrismaClient | undefined) {
     SOLD_ORDER_HAS_SHIPSTATION &&
     typeof client?.listing?.findMany === "function" &&
     typeof client?.wooProduct?.findMany === "function" &&
-    typeof client?.soldOrder?.findMany === "function"
+    typeof client?.soldOrder?.findMany === "function" &&
+    typeof client?.postingTemplate?.findUnique === "function"
   );
 }
 

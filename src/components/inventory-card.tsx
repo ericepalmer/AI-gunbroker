@@ -7,7 +7,10 @@ import { cloneListingAction, commitListingQuickAction } from "@/app/app/inventor
 import { unlinkWooListingAction } from "@/app/app/inventory/woo-actions";
 import type { ListingCard } from "@/lib/gunbroker/types";
 import type { WooProductCard } from "@/lib/woocommerce/types";
-import { effectiveQuantity } from "@/lib/woocommerce/types";
+import {
+  listingWooPriceMismatch,
+  listingWooQuantityMismatch,
+} from "@/lib/woocommerce/types";
 import { InventoryCardShell } from "@/components/inventory-card-shell";
 import { ConfirmBreakLinkDialog } from "@/components/confirm-break-link-dialog";
 import { Button } from "@/components/ui/button";
@@ -19,6 +22,7 @@ import {
   INVENTORY_COMPACT_QTY_INPUT_CLASS,
 } from "@/lib/inventory-layout";
 import { LINKED_CARD_CLASS } from "@/lib/inventory-source";
+import { cn } from "@/lib/utils";
 
 type BreakLinkChoice = "delete-gunbroker" | "make-independent";
 
@@ -39,6 +43,15 @@ function parseMoney(value: string) {
   return Number.isFinite(next) ? next : null;
 }
 
+function formatMoney(value: number | null) {
+  if (value == null) return "—";
+  return value.toLocaleString(undefined, {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: 2,
+  });
+}
+
 export function InventoryCard({
   listing,
   woo,
@@ -53,28 +66,26 @@ export function InventoryCard({
   const [editing, setEditing] = useState(false);
   const [confirmClone, setConfirmClone] = useState(false);
   const [confirmBreakLink, setConfirmBreakLink] = useState(false);
-  const initialQty = woo ? (effectiveQuantity(woo) ?? listing.quantity) : listing.quantity;
-  const [quantity, setQuantity] = useState(String(initialQty));
+  const [quantity, setQuantity] = useState(String(listing.quantity));
   const [price, setPrice] = useState(listing.price == null ? "" : String(listing.price));
   const href = `/app/inventory/${listing.itemId}`;
 
+  const qtyMismatch = Boolean(
+    woo && listingWooQuantityMismatch(listing.quantity, woo.stockQuantity),
+  );
+  const priceMismatched = Boolean(
+    woo && listingWooPriceMismatch(listing.price, woo.price),
+  );
+  const hasDiscrepancy = qtyMismatch || priceMismatched;
+
   useEffect(() => {
-    const nextQty = woo ? (effectiveQuantity(woo) ?? listing.quantity) : listing.quantity;
-    setQuantity(String(nextQty));
+    setQuantity(String(listing.quantity));
     setPrice(listing.price == null ? "" : String(listing.price));
     setEditing(false);
-  }, [
-    listing.itemId,
-    listing.quantity,
-    listing.price,
-    woo?.manualQuantity,
-    woo?.stockQuantity,
-    woo?.linkedListing?.quantity,
-  ]);
+  }, [listing.itemId, listing.quantity, listing.price]);
 
   function resetFields() {
-    const nextQty = woo ? (effectiveQuantity(woo) ?? listing.quantity) : listing.quantity;
-    setQuantity(String(nextQty));
+    setQuantity(String(listing.quantity));
     setPrice(listing.price == null ? "" : String(listing.price));
     setEditing(false);
   }
@@ -141,7 +152,11 @@ export function InventoryCard({
   return (
     <>
       <InventoryCardShell
-        className={LINKED_CARD_CLASS}
+        className={cn(
+          LINKED_CARD_CLASS,
+          hasDiscrepancy &&
+            "border-destructive/45 bg-[color-mix(in_srgb,var(--destructive)_6%,var(--card))]",
+        )}
         thumbnailUrl={listing.thumbnailUrl}
         title={listing.title}
         href={href}
@@ -151,37 +166,51 @@ export function InventoryCard({
         onDiscard={resetFields}
         qtyPrice={
           <>
-            <label className="flex items-center gap-1 text-[10px] text-muted-foreground">
-              Qty
-              <Input
-                type="number"
-                min={1}
-                step={1}
-                value={quantity}
-                disabled={pending}
-                onFocus={() => setEditing(true)}
-                onChange={(event) => {
-                  setEditing(true);
-                  setQuantity(event.target.value);
-                }}
-                className={INVENTORY_COMPACT_QTY_INPUT_CLASS}
-              />
+            <label className="flex flex-col gap-0.5 text-[10px] text-muted-foreground">
+              <span className="flex items-center gap-1">
+                Qty
+                <Input
+                  type="number"
+                  min={1}
+                  step={1}
+                  value={quantity}
+                  disabled={pending}
+                  onFocus={() => setEditing(true)}
+                  onChange={(event) => {
+                    setEditing(true);
+                    setQuantity(event.target.value);
+                  }}
+                  className={INVENTORY_COMPACT_QTY_INPUT_CLASS}
+                />
+              </span>
+              {qtyMismatch ? (
+                <span className="leading-none text-destructive">
+                  WC still {woo?.stockQuantity ?? "—"}
+                </span>
+              ) : null}
             </label>
-            <label className="flex items-center gap-1 text-[10px] text-muted-foreground">
-              $
-              <Input
-                type="number"
-                min={0}
-                step="0.01"
-                value={price}
-                disabled={pending}
-                onFocus={() => setEditing(true)}
-                onChange={(event) => {
-                  setEditing(true);
-                  setPrice(event.target.value);
-                }}
-                className={INVENTORY_COMPACT_PRICE_INPUT_CLASS}
-              />
+            <label className="flex flex-col gap-0.5 text-[10px] text-muted-foreground">
+              <span className="flex items-center gap-1">
+                $
+                <Input
+                  type="number"
+                  min={0}
+                  step="0.01"
+                  value={price}
+                  disabled={pending}
+                  onFocus={() => setEditing(true)}
+                  onChange={(event) => {
+                    setEditing(true);
+                    setPrice(event.target.value);
+                  }}
+                  className={INVENTORY_COMPACT_PRICE_INPUT_CLASS}
+                />
+              </span>
+              {priceMismatched ? (
+                <span className="leading-none text-destructive">
+                  WC still {formatMoney(woo?.price ?? null)}
+                </span>
+              ) : null}
             </label>
           </>
         }

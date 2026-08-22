@@ -4,11 +4,15 @@ import { getSession } from "@/lib/session";
 import {
   breakWooGunBrokerLink,
   linkWooProductToGunBroker,
+  previewWooGunBrokerLink,
+  pushWooProductToGunBroker,
   setWooQuantitySource,
   type BreakWooLinkChoice,
 } from "@/lib/woocommerce/service";
 import type { QuantitySource } from "@/lib/woocommerce/types";
 import { revalidateInventoryPages } from "@/lib/revalidate-inventory";
+import { wooProductDetailPath } from "@/lib/inventory-paths";
+import { revalidatePath } from "next/cache";
 
 async function requireUserId() {
   const session = await getSession();
@@ -18,8 +22,28 @@ async function requireUserId() {
   return { ok: true as const, userId: session.user.id };
 }
 
-function refreshInventory() {
+function refreshInventory(productId?: number) {
   revalidateInventoryPages();
+  if (productId != null) {
+    revalidatePath(wooProductDetailPath(productId));
+  }
+}
+
+export async function previewWooGunBrokerLinkAction(productId: number) {
+  const auth = await requireUserId();
+  if (!auth.ok) return auth;
+  try {
+    const preview = await previewWooGunBrokerLink(auth.userId, productId);
+    return { ok: true as const, preview };
+  } catch (error) {
+    return {
+      ok: false as const,
+      error:
+        error instanceof Error
+          ? error.message
+          : "Could not preview the GunBroker listing.",
+    };
+  }
 }
 
 export async function setWooSourceAction(productId: number, sourced: boolean) {
@@ -28,7 +52,7 @@ export async function setWooSourceAction(productId: number, sourced: boolean) {
   try {
     if (sourced) {
       const linked = await linkWooProductToGunBroker(auth.userId, productId);
-      refreshInventory();
+      refreshInventory(productId);
       return {
         ok: true as const,
         itemId: linked.itemId,
@@ -47,6 +71,21 @@ export async function setWooSourceAction(productId: number, sourced: boolean) {
   }
 }
 
+export async function pushWooToGunBrokerAction(productId: number) {
+  const auth = await requireUserId();
+  if (!auth.ok) return auth;
+  try {
+    const result = await pushWooProductToGunBroker(auth.userId, productId);
+    refreshInventory(productId);
+    return { ok: true as const, itemId: result.itemId };
+  } catch (error) {
+    return {
+      ok: false as const,
+      error: error instanceof Error ? error.message : "Could not push changes to GunBroker.",
+    };
+  }
+}
+
 export async function unlinkWooListingAction(
   productId: number,
   choice: BreakWooLinkChoice = "make-independent",
@@ -55,7 +94,7 @@ export async function unlinkWooListingAction(
   if (!auth.ok) return auth;
   try {
     await breakWooGunBrokerLink(auth.userId, productId, choice);
-    refreshInventory();
+    refreshInventory(productId);
     return { ok: true as const };
   } catch (error) {
     return {
@@ -74,7 +113,7 @@ export async function setWooQuantitySourceAction(
   if (!auth.ok) return auth;
   try {
     await setWooQuantitySource(auth.userId, productId, quantitySource, manualQuantity);
-    refreshInventory();
+    refreshInventory(productId);
     return { ok: true as const };
   } catch (error) {
     return {

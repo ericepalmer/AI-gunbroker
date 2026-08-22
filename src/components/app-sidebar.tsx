@@ -2,7 +2,9 @@
 
 import { authClient } from "@/lib/auth-client";
 import {
+  DEFAULTS_PATH,
   GUNBROKER_INVENTORY_PATH,
+  isDefaultsPath,
   isGunBrokerInventoryPath,
   isWooCommerceInventoryPath,
   WOOCOMMERCE_INVENTORY_PATH,
@@ -10,7 +12,7 @@ import {
 import { isAdminRole } from "@/lib/utils";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { LayoutDashboard, LogOut, Package, Settings, Shield, Store, Target, Truck } from "lucide-react";
+import { LayoutDashboard, LayoutTemplate, LogOut, Package, Settings, Shield, Store, Target, Truck } from "lucide-react";
 import { Logo } from "@/components/logo";
 import { cn } from "@/lib/utils";
 
@@ -27,6 +29,12 @@ const links = [
     label: "GunBroker inventory",
     icon: Target,
     active: isGunBrokerInventoryPath,
+  },
+  {
+    href: DEFAULTS_PATH,
+    label: "Defaults",
+    icon: LayoutTemplate,
+    active: isDefaultsPath,
   },
   { href: "/app/sold", label: "Sold / ship", icon: Truck, active: (p: string) => p === "/app/sold" },
   {

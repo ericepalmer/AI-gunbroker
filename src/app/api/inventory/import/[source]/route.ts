@@ -2,6 +2,7 @@ import { revalidatePath } from "next/cache";
 import { NextResponse } from "next/server";
 import { importGunBrokerInventory } from "@/lib/gunbroker/listings";
 import { ndjsonImportResponse } from "@/lib/import-stream-response";
+import { revalidateInventoryPages } from "@/lib/revalidate-inventory";
 import { getSession } from "@/lib/session";
 import { importWooCommerceProducts } from "@/lib/woocommerce/service";
 
@@ -18,14 +19,17 @@ export async function POST(
 
   const { source } = await context.params;
   if (source === "gunbroker") {
-    return ndjsonImportResponse((onProgress) =>
-      importGunBrokerInventory(session.user.id, onProgress),
-    );
+    return ndjsonImportResponse(async (onProgress) => {
+      const result = await importGunBrokerInventory(session.user.id, onProgress);
+      revalidateInventoryPages();
+      return result;
+    });
   }
   if (source === "woocommerce") {
     return ndjsonImportResponse(async (onProgress) => {
       const result = await importWooCommerceProducts(session.user.id, onProgress);
       revalidatePath("/app/settings");
+      revalidateInventoryPages();
       return result;
     });
   }

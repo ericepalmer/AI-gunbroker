@@ -1,3 +1,5 @@
+import { parseCondition } from "@/lib/gunbroker/types";
+
 export type WooAttributeEntry = {
   name: string;
   slug: string | null;
@@ -8,6 +10,9 @@ export type WooGunBrokerFields = {
   manufacturer: string | null;
   caliber: string | null;
   rounds: number | null;
+  model: string | null;
+  mount: string | null;
+  condition: number | null;
   upc: string | null;
   gtin: string | null;
   mfgPartNumber: string | null;
@@ -261,6 +266,47 @@ export function gunBrokerFieldsFromAttributes(
       pickAttr(attrs, "caliber", "calibre", "gauge", "productcaliber") ??
       pickAttrMatching(attrs, (key) => key.includes("caliber") || key.includes("calibre") || key === "gauge"),
     rounds: roundsFromAttrs ?? roundsFromDescription(options?.description),
+    model:
+      pickAttr(attrs, "model", "productmodel", "itemmodel", "modelname", "modelnumber") ??
+      pickAttrMatching(
+        attrs,
+        (key) => key === "model" || key.endsWith("model") || key.startsWith("model"),
+      ),
+    mount:
+      pickAttr(
+        attrs,
+        "mount",
+        "mounting",
+        "mountsystem",
+        "mountingsystem",
+        "thread",
+        "threadpitch",
+        "threadpattern",
+        "directthread",
+      ) ??
+      pickAttrMatching(
+        attrs,
+        (key) =>
+          key === "mount" ||
+          key.includes("mount") ||
+          key.includes("threadpitch") ||
+          key.includes("threadpattern") ||
+          (key.includes("thread") && !key.includes("threaded")),
+      ),
+    condition: parseCondition(
+      pickAttr(
+        attrs,
+        "condition",
+        "factorycondition",
+        "itemcondition",
+        "productcondition",
+        "gbcondition",
+      ) ??
+        pickAttrMatching(
+          attrs,
+          (key) => key === "condition" || key.endsWith("condition") || key.includes("factorycondition"),
+        ),
+    ),
     upc,
     gtin,
     mfgPartNumber: pickAttr(
@@ -298,6 +344,9 @@ export function resolveGunBrokerFields(input: {
   manufacturer?: string | null;
   caliber?: string | null;
   rounds?: number | null;
+  model?: string | null;
+  mount?: string | null;
+  condition?: number | null;
   upc?: string | null;
   gtin?: string | null;
   mfgPartNumber?: string | null;
@@ -311,6 +360,9 @@ export function resolveGunBrokerFields(input: {
     manufacturer: fromAttrs.manufacturer ?? input.manufacturer ?? null,
     caliber: fromAttrs.caliber ?? input.caliber ?? null,
     rounds: fromAttrs.rounds ?? input.rounds ?? roundsFromDescription(input.description),
+    model: fromAttrs.model ?? input.model ?? null,
+    mount: fromAttrs.mount ?? input.mount ?? null,
+    condition: fromAttrs.condition ?? input.condition ?? null,
     upc: fromAttrs.upc ?? input.upc ?? null,
     gtin: fromAttrs.gtin ?? input.gtin ?? null,
     mfgPartNumber: fromAttrs.mfgPartNumber ?? input.mfgPartNumber ?? null,

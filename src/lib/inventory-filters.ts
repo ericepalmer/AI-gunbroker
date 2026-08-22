@@ -1,22 +1,39 @@
 import type { InventoryTabItem } from "@/components/inventory-grid";
 import type { WooKind } from "@/lib/woocommerce/types";
-import { classifyWooProduct, matchesWooKeyword } from "@/lib/woocommerce/classify";
+import {
+  classifyWooProduct,
+  matchesWooKeyword,
+  wooKindLabel,
+} from "@/lib/woocommerce/classify";
 
-export const INVENTORY_KIND_FILTERS: { id: "all" | WooKind; label: string }[] = [
+export { wooKindLabel };
+
+const INVENTORY_KIND_FILTER_DEFS: { id: "all" | WooKind; label: string }[] = [
   { id: "all", label: "All" },
   { id: "ammo", label: "Ammo" },
   { id: "brass", label: "Brass" },
-  { id: "primers", label: "Primers" },
-  { id: "projectiles", label: "Projectiles" },
-  { id: "powder", label: "Powder" },
-  { id: "firearms", label: "Firearms" },
-  { id: "accessories", label: "Accessories" },
+  { id: "rifles", label: "Rifles" },
+  { id: "shotguns", label: "Shotguns" },
+  { id: "pistols", label: "Pistols" },
+  { id: "revolvers", label: "Revolvers" },
+  { id: "suppressors", label: "Suppressors" },
+  { id: "other", label: "Other" },
 ];
 
-export type InventoryKindFilterId = (typeof INVENTORY_KIND_FILTERS)[number]["id"];
+export type InventoryKindFilterId = (typeof INVENTORY_KIND_FILTER_DEFS)[number]["id"];
+
+/** @deprecated use inventoryKindFiltersForKinds */
+export const INVENTORY_KIND_FILTERS = INVENTORY_KIND_FILTER_DEFS;
+
+export function inventoryKindFiltersForKinds(kinds: Iterable<WooKind>) {
+  const present = new Set(kinds);
+  return INVENTORY_KIND_FILTER_DEFS.filter(
+    (filter) => filter.id === "all" || present.has(filter.id),
+  );
+}
 
 export function isInventoryKindFilterId(value: string): value is InventoryKindFilterId {
-  return INVENTORY_KIND_FILTERS.some((filter) => filter.id === value);
+  return INVENTORY_KIND_FILTER_DEFS.some((filter) => filter.id === value);
 }
 
 export function inventoryItemKind(item: InventoryTabItem): WooKind {
@@ -24,6 +41,14 @@ export function inventoryItemKind(item: InventoryTabItem): WooKind {
     return item.product.kind;
   }
   return classifyWooProduct(item.listing.title, []);
+}
+
+export function inventoryKindsFromItems(items: InventoryTabItem[]) {
+  return items.map((item) => inventoryItemKind(item));
+}
+
+export function inventoryKindsFromProducts(products: { kind: WooKind }[]) {
+  return products.map((product) => product.kind);
 }
 
 export function matchesInventoryKeyword(item: InventoryTabItem, query: string) {

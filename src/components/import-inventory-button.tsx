@@ -6,10 +6,12 @@ export function ImportInventoryButton({
   connected,
   idleLabel = "Import from GunBroker",
   lastSyncedAt,
+  connectHref,
 }: {
   connected: boolean;
   idleLabel?: string;
   lastSyncedAt?: string | null;
+  connectHref?: string;
 }) {
   return (
     <ImportProgressButton
@@ -19,6 +21,7 @@ export function ImportInventoryButton({
       sourceName="GunBroker"
       noun="listing"
       lastSyncedAt={lastSyncedAt}
+      connectHref={connectHref}
     />
   );
 }

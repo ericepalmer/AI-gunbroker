@@ -1,9 +1,10 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { toast } from "sonner";
 import { useRouter } from "next/navigation";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { formatImportProgress, type ImportProgress } from "@/lib/import-progress";
 import { runImportStream } from "@/lib/run-import-stream";
 import { formatElapsedSince } from "@/lib/sold-order-dates";
@@ -16,6 +17,7 @@ export function ImportProgressButton({
   sourceName,
   noun,
   lastSyncedAt = null,
+  connectHref,
 }: {
   connected: boolean;
   endpoint: string;
@@ -23,6 +25,7 @@ export function ImportProgressButton({
   sourceName: string;
   noun: string;
   lastSyncedAt?: string | null;
+  connectHref?: string;
 }) {
   const router = useRouter();
   const [pending, setPending] = useState(false);
@@ -59,6 +62,20 @@ export function ImportProgressButton({
       setPending(false);
       setProgress(null);
     }
+  }
+
+  const shellClass = cn(
+    "h-auto flex-col gap-0.5 py-1.5 leading-tight",
+    buttonVariants({ variant: "default" }),
+  );
+
+  if (!connected && connectHref) {
+    return (
+      <Link href={connectHref} className={shellClass}>
+        <span>{`Connect ${sourceName}`}</span>
+        <span className="text-[10px] font-normal opacity-80">Not connected</span>
+      </Link>
+    );
   }
 
   return (

@@ -3,7 +3,7 @@
 import { Info } from "lucide-react";
 
 const LINK_TOOLTIP =
-  "Check to send this product to GunBroker. After it is linked, break the link from the GunBroker inventory page.";
+  "Check to review WooCommerce vs template fields, then create a GunBroker listing. Other items (powder, primers, accessories, etc.) cannot be linked. After it is linked, break the link from the GunBroker inventory page.";
 
 export const WOO_LINK_COLUMN_CLASS = "flex w-10 shrink-0 flex-col items-center justify-center";
 
@@ -37,23 +37,28 @@ export function WooLinkCheckbox({
   disabled,
   onChange,
   productName,
+  linkBlockedReason,
 }: {
   checked: boolean;
   disabled?: boolean;
   onChange: (checked: boolean) => void;
   productName: string;
+  linkBlockedReason?: string;
 }) {
   return (
     <div className={WOO_LINK_COLUMN_CLASS}>
       <input
         type="checkbox"
-        className="size-3.5 accent-[var(--accent)]"
+        className="size-3.5 accent-[var(--accent)] disabled:opacity-40"
         checked={checked}
         disabled={disabled}
+        title={linkBlockedReason}
         aria-label={
-          checked
-            ? `${productName} is linked. Break the link from GunBroker inventory.`
-            : `Link ${productName} to GunBroker inventory`
+          linkBlockedReason
+            ? linkBlockedReason
+            : checked
+              ? `${productName} is linked. Break the link from GunBroker inventory.`
+              : `Link ${productName} to GunBroker inventory`
         }
         onChange={(event) => onChange(event.target.checked)}
       />

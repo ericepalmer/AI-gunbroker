@@ -26,6 +26,7 @@ model User {
   listings     Listing[]
   wooProducts  WooProduct[]
   soldOrders   SoldOrder[]
+  postingTemplate PostingTemplate?
 
   @@unique([email])
   @@map("user")
@@ -137,6 +138,8 @@ model Listing {
   manufacturer String?
   caliber String?
   rounds Int?
+  model String?
+  mount String?
   mfgPartNumber String?
   serialNumber String?
   gtin String?
@@ -155,6 +158,36 @@ model Listing {
   @@unique([userId, itemId])
   @@index([userId])
   @@map("listing")
+}
+
+model PostingTemplate {
+  id                     String   @id @default(cuid())
+  userId                 String   @unique
+  isFixedPrice           Boolean  @default(true)
+  listingDuration        Int      @default(90)
+  autoRelist             Int      @default(4)
+  autoRelistFixedCount   Int?
+  defaultCondition       Int      @default(1)
+  weight                 Float?   @default(2)
+  weightUnit             Int      @default(1)
+  inspectionPeriod       Int      @default(1)
+  whoPaysForShipping     Int      @default(4)
+  shippingProfileId      Int?
+  shippingClassesJson    String   @default("{\"Ground\":true}")
+  shippingClassCostsJson String   @default("{}")
+  paymentMethodsJson     String   @default("{\"VisaMastercard\":true,\"Amex\":true,\"Discover\":true}")
+  excludeStates          String   @default("CA,DC,DE,HI,IL,MA,NJ,NY,RI")
+  willShipInternational  Boolean  @default(false)
+  prop65Warning          String   @default("")
+  canOffer               Boolean  @default(false)
+  standardTextId         Int?
+  collectorsElite        Boolean  @default(false)
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("posting_template")
 }
 
 model WooProduct {
@@ -178,6 +211,9 @@ model WooProduct {
   manufacturer   String?
   caliber        String?
   rounds         Int?
+  model          String?
+  mount          String?
+  condition      Int?
   gtin           String?
   mfgPartNumber  String?
   serialNumber   String?

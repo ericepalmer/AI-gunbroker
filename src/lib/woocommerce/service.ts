@@ -4,16 +4,37 @@ import {
   commitListingQuick,
   deleteGunBrokerListing,
   patchListingCatalogFields,
+  pushListingFieldsFromWoo,
 } from "@/lib/gunbroker/listings";
 import { prisma, WOO_PRODUCT_HAS_ATTRIBUTES_JSON } from "@/lib/prisma";
 import { WOOCOMMERCE_PROVIDER, normalizeStoreUrl } from "@/lib/woocommerce/config";
 import { listWooProducts, getWooProduct, pingWooCommerce } from "@/lib/woocommerce/client";
-import { classifyWooProduct } from "@/lib/woocommerce/classify";
+import { classifyWooProduct, isLinkableWooKind, wooKindLabel } from "@/lib/woocommerce/classify";
 import {
   attributesFromJson,
   attributesToJson,
   resolveGunBrokerFields,
 } from "@/lib/woocommerce/attributes";
+import {
+  categoryRequiresFfl,
+  gunBrokerCategoryLabel,
+  resolveGunBrokerCategoryId,
+} from "@/lib/gunbroker/categories";
+import {
+  getPostingTemplate,
+  postingDefaultsFromTemplate,
+  type PostingTemplateDetail,
+} from "@/lib/gunbroker/posting-template";
+import {
+  AUTO_RELIST_OPTIONS,
+  LISTING_DURATION_OPTIONS,
+  PAYMENT_METHOD_OPTIONS,
+  RETURN_POLICY_OPTIONS,
+  SHIPPING_CLASS_OPTIONS,
+  WHO_PAYS_OPTIONS,
+  conditionLabel,
+  normalizeAutoRelistForPriceType,
+} from "@/lib/gunbroker/types";
 import { reportImportProgress, reportSaveProgress, type ImportProgressHandler } from "@/lib/import-progress";
 import {
   WooCommerceApiError,
@@ -21,6 +42,9 @@ import {
   type QuantitySource,
   type WooCommerceSecrets,
   type WooCommerceStatus,
+  type WooGunBrokerLinkPreview,
+  type WooKind,
+  type WooLinkPreviewField,
   type WooProductCard,
   type WooProductDetail,
 } from "@/lib/woocommerce/types";
@@ -52,6 +76,9 @@ function wooProductPersistFields(product: {
   manufacturer: string | null;
   caliber: string | null;
   rounds: number | null;
+  model: string | null;
+  mount: string | null;
+  condition: number | null;
   gtin: string | null;
   mfgPartNumber: string | null;
   serialNumber: string | null;
@@ -64,6 +91,9 @@ function wooProductPersistFields(product: {
     manufacturer: product.manufacturer,
     caliber: product.caliber,
     rounds: product.rounds,
+    model: product.model,
+    mount: product.mount,
+    condition: product.condition,
     upc: product.upc,
     gtin: product.gtin,
     mfgPartNumber: product.mfgPartNumber,
@@ -87,6 +117,9 @@ function wooProductPersistFields(product: {
     manufacturer: resolved.manufacturer ?? product.manufacturer,
     caliber: resolved.caliber ?? product.caliber,
     rounds: resolved.rounds ?? product.rounds,
+    model: resolved.model ?? product.model,
+    mount: resolved.mount ?? product.mount,
+    condition: resolved.condition ?? product.condition,
     gtin: resolved.gtin ?? product.gtin,
     mfgPartNumber: resolved.mfgPartNumber ?? product.mfgPartNumber,
     serialNumber: resolved.serialNumber ?? product.serialNumber,
@@ -507,6 +540,9 @@ function toWooDetail(
     manufacturer: string | null;
     caliber: string | null;
     rounds: number | null;
+    model: string | null;
+    mount: string | null;
+    condition: number | null;
     gtin: string | null;
     mfgPartNumber: string | null;
     serialNumber: string | null;
@@ -529,6 +565,9 @@ function toWooDetail(
     manufacturer: row.manufacturer,
     caliber: row.caliber,
     rounds: row.rounds,
+    model: row.model,
+    mount: row.mount,
+    condition: row.condition,
     upc: row.upc,
     gtin: row.gtin,
     mfgPartNumber: row.mfgPartNumber,
@@ -553,6 +592,9 @@ function toWooDetail(
     manufacturer: row.manufacturer,
     caliber: row.caliber,
     rounds: row.rounds,
+    model: row.model,
+    mount: row.mount,
+    condition: row.condition,
     gtin: row.gtin,
     mfgPartNumber: row.mfgPartNumber,
     serialNumber: row.serialNumber,
@@ -607,22 +649,130 @@ export async function setWooGunBrokerSource(
   });
 }
 
-export async function linkWooProductToGunBroker(userId: string, productId: number) {
+function displayValue(value: string | number | boolean | null | undefined) {
+  if (value == null || value === "") return "—";
+  if (typeof value === "boolean") return value ? "Yes" : "No";
+  return String(value);
+}
+
+function productField(
+  key: string,
+  label: string,
+  wooValue: string | number | boolean | null | undefined,
+  templateValue?: string | number | boolean | null,
+): WooLinkPreviewField {
+  const hasWoo =
+    wooValue != null &&
+    wooValue !== "" &&
+    !(typeof wooValue === "number" && Number.isNaN(wooValue));
+  return {
+    key,
+    label,
+    value: displayValue(wooValue),
+    source: hasWoo ? "woocommerce" : "blank",
+    templateValue:
+      templateValue != null && templateValue !== ""
+        ? displayValue(templateValue)
+        : null,
+  };
+}
+
+function templateField(
+  key: string,
+  label: string,
+  value: string | number | boolean | null | undefined,
+  source: WooLinkPreviewField["source"] = "template",
+): WooLinkPreviewField {
+  return {
+    key,
+    label,
+    value: displayValue(value),
+    source,
+  };
+}
+
+async function findSkeletonListing(userId: string) {
+  return prisma.listing.findFirst({
+    where: { userId },
+    orderBy: { updatedAt: "desc" },
+    select: { itemId: true, title: true },
+  });
+}
+
+function postingTemplatePreviewFields(
+  posting: PostingTemplateDetail,
+): WooLinkPreviewField[] {
+  const durationLabel =
+    LISTING_DURATION_OPTIONS.find((option) => option.value === posting.listingDuration)
+      ?.label ?? displayValue(posting.listingDuration);
+  const autoRelistNormalized = normalizeAutoRelistForPriceType(
+    posting.autoRelist,
+    posting.isFixedPrice,
+  );
+  const autoRelistLabel =
+    AUTO_RELIST_OPTIONS.find((option) => option.value === autoRelistNormalized)?.label ??
+    displayValue(autoRelistNormalized);
+  const whoPays =
+    WHO_PAYS_OPTIONS.find((option) => option.value === posting.whoPaysForShipping)?.label ??
+    displayValue(posting.whoPaysForShipping);
+  const inspection =
+    RETURN_POLICY_OPTIONS.find((option) => option.value === posting.inspectionPeriod)?.label ??
+    displayValue(posting.inspectionPeriod);
+  const shippingClasses = SHIPPING_CLASS_OPTIONS.filter(
+    (option) => posting.shippingClasses[option.key],
+  )
+    .map((option) => option.label)
+    .join(", ");
+  const paymentMethods = PAYMENT_METHOD_OPTIONS.filter(
+    (option) => posting.paymentMethods[option.key],
+  )
+    .map((option) => option.label)
+    .join(", ");
+
+  return [
+    templateField(
+      "listingType",
+      "Listing type",
+      posting.isFixedPrice ? "Fixed price" : "Auction",
+      "template",
+    ),
+    templateField("listingDuration", "Duration", durationLabel, "template"),
+    templateField("autoRelist", "Auto-relist", autoRelistLabel, "template"),
+    templateField("defaultCondition", "Default condition", conditionLabel(posting.defaultCondition), "template"),
+    templateField("weight", "Default weight", posting.weight, "template"),
+    templateField("inspectionPeriod", "Return policy", inspection, "template"),
+    templateField("whoPays", "Who pays shipping", whoPays, "template"),
+    templateField("shippingClasses", "Shipping classes", shippingClasses || "—", "template"),
+    templateField("paymentMethods", "Payment methods", paymentMethods || "—", "template"),
+    templateField(
+      "excludeStates",
+      "Excluded states",
+      posting.excludeStates.length ? posting.excludeStates.join(", ") : "None",
+      "template",
+    ),
+    templateField(
+      "willShipInternational",
+      "Ship internationally",
+      posting.willShipInternational,
+      "template",
+    ),
+    templateField("canOffer", "Best offer", posting.canOffer, "template"),
+    templateField("prop65", "Prop 65 warning", posting.prop65Warning || "—", "template"),
+    templateField(
+      "standardText",
+      "Standard text ID",
+      posting.standardTextId ?? "—",
+      "template",
+    ),
+    templateField("collectorsElite", "Collector's Elite", posting.collectorsElite, "template"),
+  ];
+}
+
+async function resolveWooLinkInputs(userId: string, productId: number) {
   const row = await prisma.wooProduct.findUnique({
     where: { userId_productId: { userId, productId } },
   });
   if (!row) throw new Error("That store product is not in Chamber.");
-
-  const template = await prisma.listing.findFirst({
-    where: { userId },
-    orderBy: { updatedAt: "desc" },
-    select: { itemId: true },
-  });
-  if (!template && !row.linkedItemId) {
-    throw new Error(
-      "Import at least one GunBroker listing first. We use it as the posting template for linked WooCommerce items.",
-    );
-  }
 
   let live = null as Awaited<ReturnType<typeof getWooProduct>>;
   try {
@@ -631,6 +781,16 @@ export async function linkWooProductToGunBroker(userId: string, productId: numbe
   } catch {
     live = null;
   }
+
+  const name = live?.name ?? row.name;
+  const categories = categoriesFrom(
+    live ? JSON.stringify(live.categories) : row.categoriesJson,
+  );
+  const kind = classifyWooProduct(name, categories);
+  const [skeleton, postingTemplate] = await Promise.all([
+    findSkeletonListing(userId),
+    getPostingTemplate(userId),
+  ]);
 
   const description = live?.description ?? row.description;
   const sku = live?.sku ?? row.sku;
@@ -643,19 +803,253 @@ export async function linkWooProductToGunBroker(userId: string, productId: numbe
     manufacturer: live?.manufacturer ?? row.manufacturer,
     caliber: live?.caliber ?? row.caliber,
     rounds: live?.rounds ?? row.rounds,
+    model: live?.model ?? row.model,
+    mount: live?.mount ?? row.mount,
+    condition: live?.condition ?? row.condition,
     upc: live?.upc ?? row.upc,
     gtin: live?.gtin ?? row.gtin,
     mfgPartNumber: live?.mfgPartNumber ?? row.mfgPartNumber,
     serialNumber: live?.serialNumber ?? row.serialNumber,
   });
+  const thumbnailUrl = live?.thumbnailUrl ?? row.thumbnailUrl;
+  const stockQuantity = live?.stockQuantity ?? row.stockQuantity;
+  const price = live?.price ?? row.price;
+  const preferredCategoryId = resolveGunBrokerCategoryId({
+    kind,
+    name,
+    categories,
+  });
+  const fflRequired = categoryRequiresFfl(preferredCategoryId);
+
+  return {
+    row,
+    skeleton,
+    postingTemplate,
+    name,
+    description,
+    sku,
+    attributesJson,
+    resolved,
+    thumbnailUrl,
+    stockQuantity,
+    price,
+    categories,
+    kind,
+    preferredCategoryId,
+    fflRequired,
+  };
+}
+
+function assertLinkableWooKind(kind: WooKind) {
+  if (!isLinkableWooKind(kind)) {
+    throw new Error(
+      "This product is classified as Other and cannot be linked to GunBroker. Chamber links rifles, shotguns, pistols, revolvers, suppressors, ammo, and brass only.",
+    );
+  }
+}
+
+export async function previewWooGunBrokerLink(
+  userId: string,
+  productId: number,
+): Promise<WooGunBrokerLinkPreview> {
+  const {
+    row,
+    skeleton,
+    postingTemplate,
+    name,
+    description,
+    sku,
+    resolved,
+    thumbnailUrl,
+    stockQuantity,
+    price,
+    categories,
+    kind,
+    preferredCategoryId,
+    fflRequired,
+  } = await resolveWooLinkInputs(userId, productId);
+
+  if (!row.linkedItemId) {
+    assertLinkableWooKind(kind);
+  }
+
+  if (row.linkedItemId) {
+    return {
+      productId,
+      productName: name,
+      alreadyLinked: true,
+      linkedItemId: row.linkedItemId,
+      kind,
+      productFields: [],
+      templateFields: [],
+      warnings: [
+        "This product is already linked. Linking again only refreshes the source flag.",
+      ],
+    };
+  }
+
+  if (!skeleton) {
+    throw new Error(
+      "Import at least one GunBroker listing first.",
+    );
+  }
+
+  const effectiveCondition = resolved.condition ?? postingTemplate.defaultCondition;
+  const categoryValue =
+    preferredCategoryId != null
+      ? `${gunBrokerCategoryLabel(preferredCategoryId)} (${preferredCategoryId})`
+      : "Unmapped — set manually after listing";
+
+  const plainDescription = description
+    ? description.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim()
+    : null;
+  const descriptionPreview = plainDescription
+    ? plainDescription.length > 80
+      ? `${plainDescription.slice(0, 80)}…`
+      : plainDescription
+    : null;
+
+  const productFields: WooLinkPreviewField[] = [
+    templateField("kind", "Category kind", wooKindLabel(kind), "chamber"),
+    productField(
+      "wcCategories",
+      "WC categories",
+      categories.length ? categories.join(", ") : null,
+    ),
+    productField("title", "Title", name),
+    productField("description", "Description", descriptionPreview),
+    productField("sku", "SKU", sku),
+    productField("upc", "UPC", resolved.upc),
+    productField("gtin", "GTIN", resolved.gtin),
+    productField("manufacturer", "Manufacturer", resolved.manufacturer),
+    productField("caliber", "Caliber", resolved.caliber),
+    productField("rounds", "Rounds / box", resolved.rounds),
+    productField("model", "Model", resolved.model),
+    productField("mount", "Mount", resolved.mount),
+    {
+      key: "condition",
+      label: "Condition",
+      value: displayValue(conditionLabel(effectiveCondition) ?? effectiveCondition),
+      source: resolved.condition != null ? "woocommerce" : "template",
+    },
+    productField("mfgPartNumber", "Mfg part #", resolved.mfgPartNumber),
+    productField("serialNumber", "Serial #", resolved.serialNumber),
+    productField("quantity", "Quantity", stockQuantity),
+    productField("price", "Price", price),
+    {
+      key: "category",
+      label: "Category",
+      value: categoryValue,
+      source: preferredCategoryId != null ? "chamber" : "blank",
+    },
+    {
+      key: "ffl",
+      label: "FFL required",
+      value: displayValue(preferredCategoryId != null ? fflRequired : false),
+      source: preferredCategoryId != null ? "chamber" : "template",
+    },
+    templateField("weight", "Default weight", postingTemplate.weight, "template"),
+    productField(
+      "photo",
+      "Photo",
+      thumbnailUrl ? "WooCommerce image" : null,
+    ),
+  ];
+
+  const templateFields: WooLinkPreviewField[] = postingTemplatePreviewFields(postingTemplate);
+
+  const warnings: string[] = [];
+  const blankRequired = productFields.filter(
+    (field) =>
+      field.source === "blank" &&
+      ["manufacturer", "caliber", "condition", "price", "quantity"].includes(field.key),
+  );
+  if (blankRequired.length) {
+    warnings.push(
+      `Missing from WooCommerce: ${blankRequired.map((field) => field.label).join(", ")}. Defaults fill condition/weight where noted.`,
+    );
+  }
+  if (preferredCategoryId == null) {
+    warnings.push(
+      "No Chamber GunBroker category mapping for this product type — confirm category manually after listing.",
+    );
+  }
+  const inheritedIds = productFields.filter(
+    (field) =>
+      (field.key === "upc" || field.key === "gtin") &&
+      field.source === "blank" &&
+      field.templateValue &&
+      field.templateValue !== "—",
+  );
+  if (inheritedIds.length) {
+    warnings.push(
+      `Template has ${inheritedIds.map((field) => field.label).join(" / ")} (${inheritedIds
+        .map((field) => field.templateValue)
+        .join(", ")}), but WooCommerce does not — they will not be copied.`,
+    );
+  }
+  const blankCatalog = productFields.filter(
+    (field) =>
+      field.source === "blank" &&
+      ["rounds", "model", "mount", "mfgPartNumber", "serialNumber"].includes(field.key) &&
+      field.templateValue &&
+      field.templateValue !== "—",
+  );
+  if (blankCatalog.length) {
+    warnings.push(
+      `Template catalog not copied (Woo blank): ${blankCatalog
+        .map((field) => `${field.label}=${field.templateValue}`)
+        .join(", ")}.`,
+    );
+  }
+
+  return {
+    productId,
+    productName: name,
+    alreadyLinked: false,
+    linkedItemId: null,
+    kind,
+    productFields,
+    templateFields,
+    warnings,
+  };
+}
+
+export async function linkWooProductToGunBroker(userId: string, productId: number) {
+  const {
+    row,
+    skeleton,
+    postingTemplate,
+    description,
+    sku,
+    attributesJson,
+    resolved,
+    thumbnailUrl,
+    stockQuantity,
+    price,
+    preferredCategoryId,
+    fflRequired,
+    kind,
+  } = await resolveWooLinkInputs(userId, productId);
+
+  if (!row.linkedItemId) {
+    assertLinkableWooKind(kind);
+  }
+
   const upc = resolved.upc;
   const manufacturer = resolved.manufacturer;
   const caliber = resolved.caliber;
   const rounds = resolved.rounds;
+  const model = resolved.model;
+  const mount = resolved.mount;
+  const condition = resolved.condition ?? postingTemplate.defaultCondition;
   const gtin = resolved.gtin;
   const mfgPartNumber = resolved.mfgPartNumber;
   const serialNumber = resolved.serialNumber;
-  const thumbnailUrl = live?.thumbnailUrl ?? row.thumbnailUrl;
+  const postingDefaults = postingDefaultsFromTemplate(postingTemplate, {
+    isFflRequired: preferredCategoryId != null ? fflRequired : false,
+  });
+  postingDefaults.condition = condition;
 
   if (row.linkedItemId) {
     await prisma.wooProduct.update({
@@ -666,6 +1060,9 @@ export async function linkWooProductToGunBroker(userId: string, productId: numbe
         manufacturer: manufacturer ?? undefined,
         caliber: caliber ?? undefined,
         rounds: rounds ?? undefined,
+        model: model ?? undefined,
+        mount: mount ?? undefined,
+        condition: condition ?? undefined,
         gtin: gtin ?? undefined,
         mfgPartNumber: mfgPartNumber ?? undefined,
         serialNumber: serialNumber ?? undefined,
@@ -683,13 +1080,13 @@ export async function linkWooProductToGunBroker(userId: string, productId: numbe
     return { itemId: row.linkedItemId, alreadyLinked: true as const };
   }
 
-  if (!template) {
+  if (!skeleton) {
     throw new Error(
-      "Import at least one GunBroker listing first. We use it as the posting template for linked WooCommerce items.",
+      "Import at least one GunBroker listing first.",
     );
   }
 
-  const itemId = await cloneGunBrokerListing(userId, template.itemId, {
+  const itemId = await cloneGunBrokerListing(userId, skeleton.itemId, {
     preferredTitle: row.name,
     preferredDescription: description,
     preferredSku: sku,
@@ -698,13 +1095,20 @@ export async function linkWooProductToGunBroker(userId: string, productId: numbe
     preferredManufacturer: manufacturer,
     preferredCaliber: caliber,
     preferredRounds: rounds,
+    preferredModel: model,
+    preferredMount: mount,
+    preferredCondition: condition,
     preferredMfgPartNumber: mfgPartNumber,
     preferredSerialNumber: serialNumber,
     preferredPictureUrls: thumbnailUrl ? [thumbnailUrl] : null,
+    preferredCategoryId,
+    preferredIsFflRequired: preferredCategoryId != null ? fflRequired : undefined,
+    includePremiumFeatures: false,
+    postingDefaults,
   });
   await commitListingQuick(userId, itemId, {
-    quantity: Math.max(1, Math.round(row.stockQuantity ?? 1)),
-    price: row.price ?? null,
+    quantity: Math.max(1, Math.round(stockQuantity ?? 1)),
+    price: price ?? null,
   });
   try {
     await patchListingCatalogFields(userId, itemId, resolved);
@@ -721,6 +1125,9 @@ export async function linkWooProductToGunBroker(userId: string, productId: numbe
       manufacturer: manufacturer ?? undefined,
       caliber: caliber ?? undefined,
       rounds: rounds ?? undefined,
+      model: model ?? undefined,
+      mount: mount ?? undefined,
+      condition: condition ?? undefined,
       gtin: gtin ?? undefined,
       mfgPartNumber: mfgPartNumber ?? undefined,
       serialNumber: serialNumber ?? undefined,
@@ -732,6 +1139,103 @@ export async function linkWooProductToGunBroker(userId: string, productId: numbe
   });
 
   return { itemId, alreadyLinked: false as const };
+}
+
+/** Push current WooCommerce values onto the linked GunBroker listing. */
+export async function pushWooProductToGunBroker(userId: string, productId: number) {
+  const row = await prisma.wooProduct.findUnique({
+    where: { userId_productId: { userId, productId } },
+  });
+  if (!row) throw new Error("That store product is not in Chamber.");
+  if (!row.linkedItemId) {
+    throw new Error("Link this product to GunBroker before pushing changes.");
+  }
+
+  let live = null as Awaited<ReturnType<typeof getWooProduct>>;
+  try {
+    const { secrets } = await credentialsFor(userId);
+    live = await getWooProduct(secrets, row.productId, row.parentId);
+  } catch {
+    live = null;
+  }
+
+  const name = live?.name ?? row.name;
+  const description = live?.description ?? row.description;
+  const sku = live?.sku ?? row.sku;
+  const attributesJson = live
+    ? attributesToJson(live.attributes)
+    : readRowAttributesJson(row);
+  const resolved = resolveGunBrokerFields({
+    description,
+    attributesJson,
+    manufacturer: live?.manufacturer ?? row.manufacturer,
+    caliber: live?.caliber ?? row.caliber,
+    rounds: live?.rounds ?? row.rounds,
+    model: live?.model ?? row.model,
+    mount: live?.mount ?? row.mount,
+    condition: live?.condition ?? row.condition,
+    upc: live?.upc ?? row.upc,
+    gtin: live?.gtin ?? row.gtin,
+    mfgPartNumber: live?.mfgPartNumber ?? row.mfgPartNumber,
+    serialNumber: live?.serialNumber ?? row.serialNumber,
+  });
+  const thumbnailUrl = live?.thumbnailUrl ?? row.thumbnailUrl;
+  const stockQuantity = live?.stockQuantity ?? row.stockQuantity;
+  const price = live?.price ?? row.price;
+  const categories = categoriesFrom(
+    live ? JSON.stringify(live.categories) : row.categoriesJson,
+  );
+  const kind = classifyWooProduct(name, categories);
+  const preferredCategoryId = resolveGunBrokerCategoryId({
+    kind,
+    name,
+    categories,
+  });
+
+  await prisma.wooProduct.update({
+    where: { userId_productId: { userId, productId } },
+    data: {
+      name,
+      description: description ?? undefined,
+      manufacturer: resolved.manufacturer ?? undefined,
+      caliber: resolved.caliber ?? undefined,
+      rounds: resolved.rounds ?? undefined,
+      model: resolved.model ?? undefined,
+      mount: resolved.mount ?? undefined,
+      condition: resolved.condition ?? undefined,
+      gtin: resolved.gtin ?? undefined,
+      mfgPartNumber: resolved.mfgPartNumber ?? undefined,
+      serialNumber: resolved.serialNumber ?? undefined,
+      upc: resolved.upc ?? undefined,
+      sku: sku ?? undefined,
+      thumbnailUrl: thumbnailUrl ?? undefined,
+      stockQuantity: stockQuantity ?? undefined,
+      price: price ?? undefined,
+      ...(WOO_PRODUCT_HAS_ATTRIBUTES_JSON ? { attributesJson } : {}),
+    },
+  });
+
+  await pushListingFieldsFromWoo(userId, row.linkedItemId, {
+    title: name,
+    description,
+    sku,
+    upc: resolved.upc,
+    gtin: resolved.gtin,
+    manufacturer: resolved.manufacturer,
+    caliber: resolved.caliber,
+    rounds: resolved.rounds,
+    model: resolved.model,
+    mount: resolved.mount,
+    condition: resolved.condition,
+    serialNumber: resolved.serialNumber,
+    mfgPartNumber: resolved.mfgPartNumber,
+    quantity: stockQuantity != null ? Math.max(1, Math.round(stockQuantity)) : null,
+    price,
+    categoryId: preferredCategoryId,
+    isFflRequired: categoryRequiresFfl(preferredCategoryId) ? true : undefined,
+  });
+
+  return { itemId: row.linkedItemId };
 }
 
 export async function linkWooProductToListing(

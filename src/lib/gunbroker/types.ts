@@ -192,6 +192,8 @@ export type ListingDetail = ListingCard & {
   manufacturer: string | null;
   caliber: string | null;
   rounds: number | null;
+  model: string | null;
+  mount: string | null;
   mfgPartNumber: string | null;
   serialNumber: string | null;
   gtin: string | null;
@@ -696,11 +698,16 @@ export function shippingClassCostsEqual(
 }
 
 export const CONDITION_OPTIONS = [
-  { value: 1, label: "New" },
+  { value: 1, label: "Factory New" },
   { value: 2, label: "New old stock" },
   { value: 3, label: "Used" },
   { value: 4, label: "Reloaded" },
 ] as const;
+
+export function conditionLabel(value: number | null | undefined) {
+  if (value == null) return null;
+  return CONDITION_OPTIONS.find((option) => option.value === value)?.label ?? null;
+}
 
 export const WEIGHT_UNIT_OPTIONS = [
   { value: 1, label: "lb" },
@@ -861,6 +868,17 @@ export function parseAutoRelist(value: unknown): number | null {
   if (id === 32000 || id === 35000) return 2;
   if (id > 4 && id <= 999) return 3;
   return null;
+}
+
+/** GunBroker rejects AutoRelist=2 (until sold) on fixed-price creates/updates. */
+export function normalizeAutoRelistForPriceType(
+  autoRelist: number | null,
+  isFixedPrice: boolean,
+): number | null {
+  if (autoRelist == null) return null;
+  if (isFixedPrice && autoRelist === 2) return 4;
+  if (!isFixedPrice && autoRelist === 4) return 2;
+  return autoRelist;
 }
 
 export function parseAutoRelistFixedCount(value: unknown, autoRelist: number | null) {
@@ -1271,6 +1289,8 @@ export type ListingEdits = {
   manufacturer: string;
   caliber: string;
   rounds: number | null;
+  model: string;
+  mount: string;
   mfgPartNumber: string;
   serialNumber: string;
   gtin: string;

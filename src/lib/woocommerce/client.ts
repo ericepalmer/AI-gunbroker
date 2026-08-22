@@ -36,6 +36,9 @@ export type WooProductRecord = {
   manufacturer: string | null;
   caliber: string | null;
   rounds: number | null;
+  model: string | null;
+  mount: string | null;
+  condition: number | null;
   gtin: string | null;
   mfgPartNumber: string | null;
   serialNumber: string | null;
@@ -73,11 +76,32 @@ function money(value: unknown) {
 
 function errorFrom(status: number, payload: unknown) {
   const record = asRecord(payload);
-  const message =
+  const raw =
     asString(record?.message) ??
     asString(record?.userMessage) ??
-    `WooCommerce request failed (${status}).`;
-  return new WooCommerceApiError(status, message);
+    null;
+  if (raw && looksLikeHtml(raw)) {
+    return new WooCommerceApiError(
+      status,
+      status >= 500
+        ? `Your WooCommerce store returned HTTP ${status}. Check the site host / PHP error log — this is a store-side failure, not Chamber.`
+        : `WooCommerce returned HTML instead of JSON (HTTP ${status}).`,
+    );
+  }
+  return new WooCommerceApiError(
+    status,
+    raw ?? `WooCommerce request failed (${status}).`,
+  );
+}
+
+function looksLikeHtml(value: string) {
+  const trimmed = value.trimStart().slice(0, 64).toLowerCase();
+  return (
+    trimmed.startsWith("<!doctype") ||
+    trimmed.startsWith("<html") ||
+    trimmed.includes("<title>") ||
+    trimmed.includes("internal server error")
+  );
 }
 
 async function parseJson(response: Response) {
@@ -86,7 +110,12 @@ async function parseJson(response: Response) {
   try {
     return JSON.parse(text) as unknown;
   } catch {
-    return { message: text };
+    if (looksLikeHtml(text)) {
+      return {
+        message: `WooCommerce returned HTML instead of JSON (HTTP ${response.status}).`,
+      };
+    }
+    return { message: text.slice(0, 280) };
   }
 }
 
@@ -191,6 +220,9 @@ function coalesceProduct(child: WooProductRecord, parent: WooProductRecord | nul
     manufacturer: child.manufacturer ?? parent.manufacturer ?? fields.manufacturer,
     caliber: child.caliber ?? parent.caliber ?? fields.caliber,
     rounds: child.rounds ?? parent.rounds ?? fields.rounds,
+    model: child.model ?? parent.model ?? fields.model,
+    mount: child.mount ?? parent.mount ?? fields.mount,
+    condition: child.condition ?? parent.condition ?? fields.condition,
     gtin: child.gtin ?? parent.gtin ?? fields.gtin,
     mfgPartNumber: child.mfgPartNumber ?? parent.mfgPartNumber ?? fields.mfgPartNumber,
     serialNumber: child.serialNumber ?? parent.serialNumber ?? fields.serialNumber,
@@ -233,6 +265,9 @@ function mapProduct(item: unknown, fallbackParentId = 0): WooProductRecord | nul
     manufacturer: fields.manufacturer,
     caliber: fields.caliber,
     rounds: fields.rounds,
+    model: fields.model,
+    mount: fields.mount,
+    condition: fields.condition,
     gtin: fields.gtin,
     mfgPartNumber: fields.mfgPartNumber,
     serialNumber: fields.serialNumber,

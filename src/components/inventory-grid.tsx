@@ -1,5 +1,6 @@
 import type { ListingCard } from "@/lib/gunbroker/types";
 import type { WooProductCard } from "@/lib/woocommerce/types";
+import { listingWooDiscrepancy } from "@/lib/woocommerce/types";
 import { InventoryCard } from "@/components/inventory-card";
 import { WooInventoryCard } from "@/components/woo-inventory-card";
 import { INVENTORY_GRID_CLASS, INVENTORY_GRID_ITEM_CLASS } from "@/lib/inventory-layout";
@@ -7,7 +8,6 @@ import {
   InventorySectionBreak,
   InventorySectionHeading,
 } from "@/components/inventory-section-heading";
-import { isWooSourcedItem } from "@/lib/inventory-source";
 
 export type InventoryTabItem =
   | { key: string; kind: "listing"; listing: ListingCard }
@@ -76,22 +76,41 @@ export function InventoryGrid({
     );
   }
 
-  const wooSourced = items.filter(isWooSourcedItem);
+  const discrepancies = items.filter(
+    (item) =>
+      item.kind === "linked" && listingWooDiscrepancy(item.listing, item.product),
+  );
+  const linked = items.filter((item) => {
+    if (item.kind === "woo") return true;
+    if (item.kind !== "linked") return false;
+    return !listingWooDiscrepancy(item.listing, item.product);
+  });
   const independent = items.filter((item) => item.kind === "listing");
-  const showSectionBreak = wooSourced.length > 0 && independent.length > 0;
+
+  const sections = [
+    { title: "Linked with discrepancies", items: discrepancies, keyBase: "discrepancy" },
+    { title: "Linked", items: linked, keyBase: "linked" },
+    { title: "Independent", items: independent, keyBase: "independent" },
+  ].filter((section) => section.items.length > 0);
 
   return (
     <div className={INVENTORY_GRID_CLASS}>
-      {wooSourced.length > 0 ? (
-        <InventorySectionHeading>WooCommerce linked</InventorySectionHeading>
-      ) : null}
-      {wooSourced.map(renderItem)}
-      {showSectionBreak ? sectionGapFillers(wooSourced.length, "woo-linked") : null}
-      {showSectionBreak ? <InventorySectionBreak title="Independent" /> : null}
-      {independent.length > 0 && wooSourced.length === 0 ? (
-        <InventorySectionHeading>Independent</InventorySectionHeading>
-      ) : null}
-      {independent.map(renderItem)}
+      {sections.flatMap((section, index) => {
+        const nodes = [
+          index === 0 ? (
+            <InventorySectionHeading key={`${section.keyBase}-heading`}>
+              {section.title}
+            </InventorySectionHeading>
+          ) : (
+            <InventorySectionBreak key={`${section.keyBase}-heading`} title={section.title} />
+          ),
+          ...section.items.map(renderItem),
+        ];
+        if (index < sections.length - 1) {
+          nodes.push(...sectionGapFillers(section.items.length, section.keyBase));
+        }
+        return nodes;
+      })}
     </div>
   );
 }

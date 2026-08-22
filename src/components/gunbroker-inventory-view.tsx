@@ -1,26 +1,22 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { InventoryTabItem } from "@/components/inventory-grid";
 import { InventoryGrid } from "@/components/inventory-grid";
 import { ShowZeroInventory } from "@/components/show-zero-inventory";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
-  INVENTORY_KIND_FILTERS,
+  inventoryKindFiltersForKinds,
+  inventoryKindsFromItems,
   matchesInventoryKeyword,
   matchesInventoryKindFilter,
+  type InventoryKindFilterId,
 } from "@/lib/inventory-filters";
-import type { WooKind } from "@/lib/woocommerce/types";
 import { effectiveQuantity } from "@/lib/woocommerce/types";
 
 function itemInStock(item: InventoryTabItem) {
-  if (item.kind === "listing") return item.listing.quantity > 0;
-  if (item.kind === "linked") {
-    const qty = effectiveQuantity(item.product);
-    if (qty != null) return qty > 0;
-    return item.listing.quantity > 0;
-  }
+  if (item.kind === "listing" || item.kind === "linked") return item.listing.quantity > 0;
   const qty = effectiveQuantity(item.product);
   if (qty != null) return qty > 0;
   return item.product.stockStatus !== "outofstock";
@@ -34,8 +30,19 @@ export function GunBrokerInventoryView({
   emptyMessage: string;
 }) {
   const [query, setQuery] = useState("");
-  const [kind, setKind] = useState<(typeof INVENTORY_KIND_FILTERS)[number]["id"]>("all");
+  const [kind, setKind] = useState<InventoryKindFilterId>("all");
   const [showZero, setShowZero] = useState(false);
+
+  const kindFilters = useMemo(
+    () => inventoryKindFiltersForKinds(inventoryKindsFromItems(items)),
+    [items],
+  );
+
+  useEffect(() => {
+    if (kind !== "all" && !kindFilters.some((filter) => filter.id === kind)) {
+      setKind("all");
+    }
+  }, [kind, kindFilters]);
 
   const visibleItems = useMemo(() => {
     return items.filter((item) => {
@@ -56,7 +63,7 @@ export function GunBrokerInventoryView({
     <div className="space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex flex-wrap items-center gap-2">
-          {INVENTORY_KIND_FILTERS.map((filter) => (
+          {kindFilters.map((filter) => (
             <Button
               key={filter.id}
               type="button"

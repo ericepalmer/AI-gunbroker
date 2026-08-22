@@ -1,11 +1,12 @@
 "use client";
 
-import { useLayoutEffect, useMemo, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useState } from "react";
 import type { WooProductCard } from "@/lib/woocommerce/types";
 import { effectiveQuantity } from "@/lib/woocommerce/types";
 import { matchesWooKeyword } from "@/lib/woocommerce/classify";
 import {
-  INVENTORY_KIND_FILTERS,
+  inventoryKindFiltersForKinds,
+  inventoryKindsFromProducts,
   isInventoryKindFilterId,
   type InventoryKindFilterId,
 } from "@/lib/inventory-filters";
@@ -58,10 +59,21 @@ export function WooInventoryGrid({ products }: { products: WooProductCard[] }) {
   const [kind, setKind] = useState<InventoryKindFilterId>("all");
   const [showZero, setShowZero] = useState(false);
 
+  const kindFilters = useMemo(
+    () => inventoryKindFiltersForKinds(inventoryKindsFromProducts(products)),
+    [products],
+  );
+
   useLayoutEffect(() => {
     const stored = window.localStorage.getItem(WOO_KIND_FILTER_KEY);
     if (stored && isInventoryKindFilterId(stored)) setKind(stored);
   }, []);
+
+  useEffect(() => {
+    if (kind !== "all" && !kindFilters.some((filter) => filter.id === kind)) {
+      setKind("all");
+    }
+  }, [kind, kindFilters]);
 
   function selectKind(next: InventoryKindFilterId) {
     setKind(next);
@@ -88,7 +100,7 @@ export function WooInventoryGrid({ products }: { products: WooProductCard[] }) {
     <div className="space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex flex-wrap items-center gap-2">
-          {INVENTORY_KIND_FILTERS.map((filter) => (
+          {kindFilters.map((filter) => (
             <Button
               key={filter.id}
               type="button"

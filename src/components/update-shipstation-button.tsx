@@ -1,20 +1,24 @@
 "use client";
 
 import { useTransition } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { updateSoldOrdersFromShipStationAction } from "@/app/app/sold/actions";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { formatElapsedSince } from "@/lib/sold-order-dates";
+import { cn } from "@/lib/utils";
 
 export function UpdateShipStationButton({
   connected,
   lastSyncedAt,
   idleLabel = "Update ShipStation",
+  connectHref,
 }: {
   connected: boolean;
   lastSyncedAt: string | null;
   idleLabel?: string;
+  connectHref?: string;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -45,6 +49,21 @@ export function UpdateShipStationButton({
       }
       router.refresh();
     });
+  }
+
+  if (!connected && connectHref) {
+    return (
+      <Link
+        href={connectHref}
+        className={cn(
+          buttonVariants({ variant: "default" }),
+          "h-auto flex-col gap-0.5 py-1.5 leading-tight",
+        )}
+      >
+        <span>Connect ShipStation</span>
+        <span className="text-[10px] font-normal opacity-80">Not connected</span>
+      </Link>
+    );
   }
 
   return (

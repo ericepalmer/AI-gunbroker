@@ -6,10 +6,12 @@ export function ImportStoreButton({
   connected,
   idleLabel = "Import from WooCommerce",
   lastSyncedAt,
+  connectHref,
 }: {
   connected: boolean;
   idleLabel?: string;
   lastSyncedAt?: string | null;
+  connectHref?: string;
 }) {
   return (
     <ImportProgressButton
@@ -19,6 +21,7 @@ export function ImportStoreButton({
       sourceName="WooCommerce"
       noun="product"
       lastSyncedAt={lastSyncedAt}
+      connectHref={connectHref}
     />
   );
 }

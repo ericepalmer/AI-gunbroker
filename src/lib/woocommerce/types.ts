@@ -20,11 +20,11 @@ export type QuantitySource = "woocommerce" | "gunbroker" | "manual";
 export type WooKind =
   | "ammo"
   | "brass"
-  | "primers"
-  | "projectiles"
-  | "powder"
-  | "firearms"
-  | "accessories"
+  | "rifles"
+  | "shotguns"
+  | "pistols"
+  | "revolvers"
+  | "suppressors"
   | "other";
 
 export type { WooAttributeEntry, WooGunBrokerFields };
@@ -69,6 +69,9 @@ export type WooProductDetail = WooProductCard & {
   manufacturer: string | null;
   caliber: string | null;
   rounds: number | null;
+  model: string | null;
+  mount: string | null;
+  condition: number | null;
   gtin: string | null;
   mfgPartNumber: string | null;
   serialNumber: string | null;
@@ -83,6 +86,30 @@ export type LinkableListing = {
   quantity: number;
 };
 
+export type WooLinkFieldSource = "woocommerce" | "template" | "chamber" | "blank";
+
+export type WooLinkPreviewField = {
+  key: string;
+  label: string;
+  value: string;
+  source: WooLinkFieldSource;
+  /** Template value when source is Woo/blank but template had something (for disclosure). */
+  templateValue?: string | null;
+};
+
+export type WooGunBrokerLinkPreview = {
+  productId: number;
+  productName: string;
+  alreadyLinked: boolean;
+  linkedItemId: string | null;
+  kind: WooKind;
+  /** Product/catalog fields (prefer WooCommerce). */
+  productFields: WooLinkPreviewField[];
+  /** Posting mechanics taken from the GunBroker template. */
+  templateFields: WooLinkPreviewField[];
+  warnings: string[];
+};
+
 export function effectiveQuantity(product: WooProductCard) {
   if (product.quantitySource === "manual") return product.manualQuantity;
   if (product.quantitySource === "gunbroker") {
@@ -91,12 +118,53 @@ export function effectiveQuantity(product: WooProductCard) {
   return product.stockQuantity;
 }
 
+function moneyEqual(a: number | null, b: number | null) {
+  if (a == null && b == null) return true;
+  if (a == null || b == null) return false;
+  return Math.abs(a - b) < 0.005;
+}
+
 export function quantityMismatch(product: WooProductCard) {
   if (!product.linkedListing) return false;
   const wooQty = product.stockQuantity;
   const gbQty = product.linkedListing.quantity;
   if (wooQty == null) return false;
   return wooQty !== gbQty;
+}
+
+export function priceMismatch(product: WooProductCard) {
+  if (!product.linkedListing) return false;
+  return !moneyEqual(product.price, product.linkedListing.price);
+}
+
+/** Qty or price differs between WooCommerce and the linked GunBroker listing. */
+export function linkedDiscrepancy(product: WooProductCard) {
+  return quantityMismatch(product) || priceMismatch(product);
+}
+
+export function listingWooQuantityMismatch(
+  listingQuantity: number,
+  wooStockQuantity: number | null,
+) {
+  if (wooStockQuantity == null) return false;
+  return listingQuantity !== wooStockQuantity;
+}
+
+export function listingWooPriceMismatch(
+  listingPrice: number | null,
+  wooPrice: number | null,
+) {
+  return !moneyEqual(listingPrice, wooPrice);
+}
+
+export function listingWooDiscrepancy(
+  listing: { quantity: number; price: number | null },
+  product: Pick<WooProductCard, "stockQuantity" | "price">,
+) {
+  return (
+    listingWooQuantityMismatch(listing.quantity, product.stockQuantity) ||
+    listingWooPriceMismatch(listing.price, product.price)
+  );
 }
 
 export class WooCommerceApiError extends Error {

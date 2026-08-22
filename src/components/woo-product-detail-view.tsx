@@ -2,9 +2,15 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { useState, useTransition } from "react";
+import { toast } from "sonner";
 import { ExternalLink, Store } from "lucide-react";
+import { pushWooToGunBrokerAction } from "@/app/app/inventory/woo-actions";
 import type { WooProductDetail } from "@/lib/woocommerce/types";
 import { effectiveQuantity } from "@/lib/woocommerce/types";
+import { conditionLabel } from "@/lib/gunbroker/types";
+import { isLinkableWooKind, wooKindLabel } from "@/lib/woocommerce/classify";
+import { ConfirmPushWooToGunBrokerDialog } from "@/components/confirm-push-woo-to-gunbroker-dialog";
 import { InventoryThumbnail } from "@/components/inventory-thumbnail";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -50,11 +56,32 @@ function stripHtml(value: string | null) {
 export function WooProductDetailView({ product }: { product: WooProductDetail }) {
   const router = useRouter();
   const qty = effectiveQuantity(product);
+  const [confirmPush, setConfirmPush] = useState(false);
+  const [pending, startTransition] = useTransition();
+
+  function onPushConfirm() {
+    if (pending) return;
+    startTransition(async () => {
+      const result = await pushWooToGunBrokerAction(product.productId);
+      if (!result.ok) {
+        toast.error(result.error);
+        return;
+      }
+      setConfirmPush(false);
+      toast.success(`Pushed changes to GunBroker item ${result.itemId}.`);
+      router.refresh();
+    });
+  }
 
   return (
     <div className="mx-auto max-w-4xl px-4 py-5">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-        <Button type="button" variant="secondary" size="sm" onClick={() => router.push(WOOCOMMERCE_INVENTORY_PATH)}>
+        <Button
+          type="button"
+          variant="secondary"
+          size="sm"
+          onClick={() => router.push(WOOCOMMERCE_INVENTORY_PATH)}
+        >
           Back to WooCommerce inventory
         </Button>
         <div className="flex flex-wrap items-center gap-2">
@@ -66,12 +93,22 @@ export function WooProductDetailView({ product }: { product: WooProductDetail })
             <Badge tone="default">GunBroker source</Badge>
           ) : null}
           {product.linkedListing ? (
-            <Link
-              href={`/app/inventory/${product.linkedListing.itemId}`}
-              className="text-xs text-accent underline-offset-4 hover:underline"
-            >
-              Linked GB item {product.linkedListing.itemId}
-            </Link>
+            <>
+              <Link
+                href={`/app/inventory/${product.linkedListing.itemId}`}
+                className="text-xs text-accent underline-offset-4 hover:underline"
+              >
+                Linked GB item {product.linkedListing.itemId}
+              </Link>
+              <Button
+                type="button"
+                size="sm"
+                disabled={pending}
+                onClick={() => setConfirmPush(true)}
+              >
+                Push changes to GunBroker
+              </Button>
+            </>
           ) : null}
           {product.permalink ? (
             <a
@@ -86,6 +123,12 @@ export function WooProductDetailView({ product }: { product: WooProductDetail })
           ) : null}
         </div>
       </div>
+
+      {product.linkedListing ? (
+        <p className="mb-4 rounded-md border border-border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
+          Pushing to GunBroker overwrites GunBroker values for any field WooCommerce also has.
+        </p>
+      ) : null}
 
       <div className="rounded-xl border border-border bg-card p-5">
         <div className="flex flex-wrap items-start gap-4">
@@ -116,9 +159,17 @@ export function WooProductDetailView({ product }: { product: WooProductDetail })
           />
           <Field label="Stock quantity" value={product.stockQuantity} />
           <Field label="Effective quantity" value={qty} />
-          <Field label="Category kind" value={product.kind} />
+          <Field label="Category kind" value={wooKindLabel(product.kind)} />
           <Field label="Categories" value={product.categories.join(", ") || null} />
         </section>
+
+        {!isLinkableWooKind(product.kind) && !product.linkedListing ? (
+          <p className="mt-4 rounded-md border border-border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
+            Other items cannot be linked or sent to GunBroker. Assign a supported WooCommerce
+            category (rifles, shotguns, pistols, revolvers, suppressors, ammo, or brass) to link
+            this product.
+          </p>
+        ) : null}
 
         <section className="mt-8 space-y-3">
           <h2 className="text-sm font-medium">Description</h2>
@@ -137,7 +188,10 @@ export function WooProductDetailView({ product }: { product: WooProductDetail })
           </div>
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             <Field label="Manufacturer" value={product.gunBrokerFields.manufacturer} />
+            <Field label="Model" value={product.gunBrokerFields.model} />
             <Field label="Caliber" value={product.gunBrokerFields.caliber} />
+            <Field label="Factory condition" value={conditionLabel(product.gunBrokerFields.condition)} />
+            <Field label="Mount" value={product.gunBrokerFields.mount} />
             <Field label="Cartridges per box" value={product.gunBrokerFields.rounds} />
             <Field label="Mfg part number" value={product.gunBrokerFields.mfgPartNumber} mono />
             <Field label="Serial number" value={product.gunBrokerFields.serialNumber} mono />
@@ -155,7 +209,10 @@ export function WooProductDetailView({ product }: { product: WooProductDetail })
           </div>
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             <Field label="Manufacturer" value={product.manufacturer} />
+            <Field label="Model" value={product.model} />
             <Field label="Caliber" value={product.caliber} />
+            <Field label="Factory condition" value={conditionLabel(product.condition)} />
+            <Field label="Mount" value={product.mount} />
             <Field label="Cartridges per box" value={product.rounds} />
             <Field label="Mfg part number" value={product.mfgPartNumber} mono />
             <Field label="Serial number" value={product.serialNumber} mono />
@@ -181,7 +238,10 @@ export function WooProductDetailView({ product }: { product: WooProductDetail })
                 </thead>
                 <tbody>
                   {product.attributes.map((attribute) => (
-                    <tr key={`${attribute.slug ?? attribute.name}:${attribute.value}`} className="border-t border-border/60">
+                    <tr
+                      key={`${attribute.slug ?? attribute.name}:${attribute.value}`}
+                      className="border-t border-border/60"
+                    >
                       <td className="px-3 py-2">{attribute.name}</td>
                       <td className="px-3 py-2 font-mono text-xs text-muted-foreground">
                         {attribute.slug ?? "—"}
@@ -197,6 +257,17 @@ export function WooProductDetailView({ product }: { product: WooProductDetail })
           )}
         </section>
       </div>
+
+      {product.linkedListing ? (
+        <ConfirmPushWooToGunBrokerDialog
+          open={confirmPush}
+          productName={product.name}
+          listingTitle={product.linkedListing.title}
+          pending={pending}
+          onCancel={() => setConfirmPush(false)}
+          onConfirm={onPushConfirm}
+        />
+      ) : null}
     </div>
   );
 }

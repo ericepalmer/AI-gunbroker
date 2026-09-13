@@ -1,0 +1,34 @@
+# Dependencies & build output
+node_modules
+.next
+out
+build
+coverage
+
+# Git / IDE
+.git
+.gitignore
+.cursor
+.vscode
+*.md
+!README.md
+
+# Env & local secrets (runtime uses env_file / DO secrets)
+.env
+.env.*
+!.env.production.example
+!.env.example
+
+# Local SQLite
+prisma/*.db
+prisma/*.db-journal
+prisma/*.db-*
+
+# Misc
+.DS_Store
+*.pem
+*.tsbuildinfo
+next-env.d.ts
+f
+agent-transcripts
+.vercel

@@ -1,0 +1,60 @@
+# DigitalOcean Droplet deploy: persistent SQLite + optional Caddy TLS.
+#
+# Quick start (HTTP on :3000):
+#   cp .env.production.example .env.production   # fill secrets
+#   docker compose up -d --build
+#
+# HTTPS with Caddy (set DOMAIN=your.domain.com in .env.production):
+#   APP_PUBLISH_PORT=127.0.0.1:3000 docker compose --profile tls up -d --build
+
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    env_file:
+      - .env.production
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-file:/data/chamber.db}
+      DATA_DIR: /data
+      HOSTNAME: 0.0.0.0
+      PORT: "3000"
+    volumes:
+      - chamber_data:/data
+    ports:
+      # Default: public :3000. For TLS profile, use APP_PUBLISH_PORT=127.0.0.1:3000
+      - "${APP_PUBLISH_PORT:-3000}:3000"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3000').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+
+  caddy:
+    profiles: ["tls"]
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      app:
+        condition: service_healthy
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      DOMAIN: ${DOMAIN:-localhost}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  chamber_data:
+  caddy_data:
+  caddy_config:

@@ -1,0 +1,57 @@
+# Optional App Platform skeleton (Dockerfile-based).
+# Chamber currently uses SQLite on a local volume — prefer the Droplet +
+# docker-compose.yml path in the README. App Platform disks are ephemeral
+# unless you attach a volume / migrate to managed Postgres.
+#
+# Replace github.repo with your fork, set secrets in the DO UI or via doctl,
+# then: doctl apps create --spec .do/app.yaml
+
+name: chamber
+region: nyc
+services:
+  - name: web
+    github:
+      repo: ericepalmer/AI-gunbroker
+      branch: main
+      deploy_on_push: true
+    dockerfile_path: Dockerfile
+    http_port: 3000
+    instance_count: 1
+    instance_size_slug: basic-xs
+    health_check:
+      http_path: /
+    envs:
+      - key: NODE_ENV
+        value: production
+      - key: BETTER_AUTH_URL
+        scope: RUN_TIME
+        type: GENERAL
+        value: https://YOUR_APP.ondigitalocean.app
+      - key: NEXT_PUBLIC_APP_URL
+        scope: RUN_TIME
+        type: GENERAL
+        value: https://YOUR_APP.ondigitalocean.app
+      - key: BETTER_AUTH_SECRET
+        scope: RUN_TIME
+        type: SECRET
+        value: REPLACE_ME
+      - key: DATABASE_URL
+        scope: RUN_TIME
+        type: GENERAL
+        value: file:/data/chamber.db
+      - key: GUNBROKER_ENVIRONMENT
+        scope: RUN_TIME
+        type: GENERAL
+        value: production
+      - key: GUNBROKER_PRODUCTION_DEVKEY
+        scope: RUN_TIME
+        type: SECRET
+        value: REPLACE_ME
+      - key: RESEND_API_KEY
+        scope: RUN_TIME
+        type: SECRET
+        value: REPLACE_ME
+      - key: EMAIL_FROM
+        scope: RUN_TIME
+        type: GENERAL
+        value: Chamber <noreply@yourdomain.com>

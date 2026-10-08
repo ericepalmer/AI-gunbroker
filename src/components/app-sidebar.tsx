@@ -12,7 +12,7 @@ import {
 import { isAdminRole } from "@/lib/utils";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { LayoutDashboard, LayoutTemplate, LogOut, Package, Settings, Shield, Store, Target, Truck } from "lucide-react";
+import { LayoutDashboard, LayoutTemplate, LogOut, Package, Settings, Shield, Store, Target } from "lucide-react";
 import { Logo } from "@/components/logo";
 import { cn } from "@/lib/utils";
 
@@ -20,15 +20,21 @@ const links = [
   { href: "/app", label: "Dashboard", icon: LayoutDashboard, active: (p: string) => p === "/app" },
   {
     href: WOOCOMMERCE_INVENTORY_PATH,
-    label: "WooCommerce inventory",
+    label: "WooCommerce Status",
     icon: Store,
     active: isWooCommerceInventoryPath,
   },
   {
     href: GUNBROKER_INVENTORY_PATH,
-    label: "GunBroker inventory",
+    label: "GunBroker Status",
     icon: Target,
     active: isGunBrokerInventoryPath,
+  },
+  {
+    href: "/app/shipstation",
+    label: "ShipStation Status",
+    icon: Package,
+    active: (p: string) => p === "/app/shipstation" || p.startsWith("/app/shipstation/"),
   },
   {
     href: DEFAULTS_PATH,
@@ -36,7 +42,6 @@ const links = [
     icon: LayoutTemplate,
     active: isDefaultsPath,
   },
-  { href: "/app/sold", label: "Sold / ship", icon: Truck, active: (p: string) => p === "/app/sold" },
   {
     href: "/app/settings",
     label: "Settings",

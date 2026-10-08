@@ -42,6 +42,8 @@ export type SoldOrderShipTo = {
   phone: string | null;
 };
 
+export type SoldOrderSource = "gunbroker" | "woocommerce" | "other";
+
 export type SoldOrderDetails = {
   orderNumber: string;
   buyerFullName: string | null;
@@ -59,6 +61,9 @@ export type SoldOrderDetails = {
   total: number | null;
   trackingNumber: string | null;
   carrier: string | null;
+  /** Sales channel: gunbroker | woocommerce | other (ShipStation-unknown). */
+  source?: SoldOrderSource | null;
+  shipByDate?: string | null;
 };
 
 export type SoldOrderCard = {
@@ -343,6 +348,7 @@ function buildOrderDetails(
       pickField(order, "trackingNumber", "TrackingNumber", "tracking", "Tracking"),
     ),
     carrier: labelFromField(pickField(order, "carrier", "Carrier", "shipCarrier", "ShipCarrier")),
+    source: "gunbroker",
   };
 }
 
@@ -635,12 +641,15 @@ export async function importGunBrokerSoldOrders(
         trackingNumber: true,
         carrier: true,
         detailsJson: true,
+        gunBrokerNotified: true,
       },
     });
-    const gbNotified = gunBrokerBuyerNotified({
-      orderComplete: order.orderComplete,
-      orderStatus: order.orderStatus,
-    });
+    const gbNotified =
+      gunBrokerBuyerNotified({
+        orderComplete: order.orderComplete,
+        orderStatus: order.orderStatus,
+        itemShipped: order.itemShipped,
+      }) || Boolean(existing?.gunBrokerNotified);
     const terminal = [6, 12, 13].includes(order.orderStatus);
 
     let workStatus =
@@ -665,6 +674,7 @@ export async function importGunBrokerSoldOrders(
       trackingNumber: order.details.trackingNumber ?? trackingNumber,
       carrier: order.details.carrier ?? carrier,
       shippedDate: order.details.shippedDate ?? previousDetails.shippedDate,
+      source: "gunbroker" as const,
     };
 
     await prisma.soldOrder.upsert({

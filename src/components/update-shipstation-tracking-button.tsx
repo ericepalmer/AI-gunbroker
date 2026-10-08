@@ -19,16 +19,12 @@ type DoneEvent = {
   withEta: number;
 };
 
-export function UpdateShipStationButton({
+export function UpdateShipStationTrackingButton({
   connected,
   lastSyncedAt,
-  idleLabel = "Sync ShipStation",
-  connectHref,
 }: {
   connected: boolean;
   lastSyncedAt: string | null;
-  idleLabel?: string;
-  connectHref?: string;
 }) {
   const router = useRouter();
   const [pending, setPending] = useState(false);
@@ -38,13 +34,13 @@ export function UpdateShipStationButton({
     if (pending) return;
     setPending(true);
     setProgress(null);
-    const toastId = toast.loading("Syncing ShipStation…");
+    const toastId = toast.loading("Refreshing ShipStation awaiting…");
 
     try {
       const response = await fetch("/api/shipstation/update-tracking", { method: "POST" });
       if (!response.ok || !response.body) {
         const payload = (await response.json().catch(() => null)) as { error?: string } | null;
-        throw new Error(payload?.error ?? "Could not sync ShipStation.");
+        throw new Error(payload?.error ?? "Could not update tracking.");
       }
 
       const reader = response.body.getReader();
@@ -75,21 +71,20 @@ export function UpdateShipStationButton({
         }
       }
 
-      if (!done) throw new Error("ShipStation sync ended without a result.");
+      if (!done) throw new Error("Tracking update ended without a result.");
 
       const parts = [
         done.awaitingSynced ? `${done.awaitingSynced} awaiting` : null,
         done.purged ? `${done.purged} shipped removed` : null,
-        done.tracked ? `${done.tracked} checked` : null,
       ].filter(Boolean);
 
       toast.success(
-        parts.length ? `ShipStation synced · ${parts.join(" · ")}.` : "ShipStation is up to date.",
+        parts.length ? `ShipStation refreshed · ${parts.join(" · ")}.` : "ShipStation desk is up to date.",
         { id: toastId },
       );
       router.refresh();
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Could not sync ShipStation.", {
+      toast.error(error instanceof Error ? error.message : "Could not update tracking.", {
         id: toastId,
       });
     } finally {
@@ -98,10 +93,10 @@ export function UpdateShipStationButton({
     }
   }
 
-  if (!connected && connectHref) {
+  if (!connected) {
     return (
       <Link
-        href={connectHref}
+        href="/app/settings?tab=connections#connection-shipstation"
         className={cn(
           buttonVariants({ variant: "default" }),
           "h-auto flex-col gap-0.5 py-1.5 leading-tight",
@@ -117,12 +112,10 @@ export function UpdateShipStationButton({
     <Button
       type="button"
       onClick={onUpdate}
-      disabled={pending || !connected}
+      disabled={pending}
       className="h-auto flex-col gap-0.5 py-1.5 leading-tight"
     >
-      <span>
-        {pending ? (progress ? formatImportProgress(progress) : "Syncing…") : idleLabel}
-      </span>
+      <span>{pending ? (progress ? formatImportProgress(progress) : "Refreshing…") : "Refresh"}</span>
       <span className="text-[10px] font-normal opacity-80">
         {formatElapsedSince(lastSyncedAt)}
       </span>

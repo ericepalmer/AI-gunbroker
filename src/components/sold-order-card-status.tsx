@@ -96,7 +96,7 @@ export function SoldOrderInProgressStatus({
           <StepLabel
             label="Notified"
             state={pipeline.gunBrokerNotified}
-            pendingHint="Waiting for a Sync from GunBroker to confirm the buyer has been notified that this item shipped."
+            pendingHint="Waiting to send the ShipStation tracking number to GunBroker."
             doneHint="GunBroker shows this order as shipped or complete, so the buyer has been notified."
           />
         </div>

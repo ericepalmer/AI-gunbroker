@@ -53,9 +53,15 @@ export type ShipStationOrder = {
   orderStatus: string;
   orderDate: string;
   shipDate: string | null;
+  shipByDate: string | null;
   trackingNumber: string | null;
   carrierCode: string | null;
   serviceCode: string | null;
+  customerEmail: string | null;
+  shipToName: string | null;
+  itemName: string | null;
+  itemQuantity: number | null;
+  source: string | null;
 };
 
 export type ShipStationShipment = {
@@ -69,6 +75,36 @@ export type ShipStationShipment = {
   voided: boolean;
 };
 
+export type ShipStationTracking = {
+  trackingNumber: string;
+  carrierCode: string | null;
+  statusCode: string | null;
+  statusDescription: string | null;
+  estimatedDeliveryDate: string | null;
+  actualDeliveryDate: string | null;
+};
+
+export type ShipStationDeskSource = "gunbroker" | "woocommerce" | "other";
+
+export type ShipStationDeskRow = {
+  orderId: string;
+  shipStationOrderId: string | null;
+  title: string | null;
+  buyerName: string | null;
+  orderDate: string | null;
+  shipDate: string | null;
+  shipByDate: string | null;
+  trackingNumber: string | null;
+  carrier: string | null;
+  shipStationStatus: string | null;
+  deliveryStatus: string | null;
+  deliveryStatusLabel: string | null;
+  estimatedDeliveryAt: string | null;
+  deliveredAt: string | null;
+  trackingSyncedAt: string | null;
+  source: ShipStationDeskSource;
+};
+
 export type ShipStationCheckResult = {
   found: boolean;
   orderStatus: string | null;
@@ -77,6 +113,8 @@ export type ShipStationCheckResult = {
   shipDate: string | null;
   shipStationOrderId: string | null;
   updated: boolean;
+  gunBrokerNotified: boolean;
+  notifyError: string | null;
 };
 
 export class ShipStationApiError extends Error {

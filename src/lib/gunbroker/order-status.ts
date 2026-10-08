@@ -72,8 +72,9 @@ export function defaultWorkStatus(input: { orderStatus: number }) {
 export function gunBrokerBuyerNotified(input: {
   orderComplete: boolean;
   orderStatus: number;
+  itemShipped?: boolean;
 }) {
-  return input.orderComplete || input.orderStatus === 5;
+  return input.orderComplete || input.itemShipped === true || input.orderStatus === 5;
 }
 
 export function orderStatusTone(status: number): "default" | "accent" | "success" | "warning" | "danger" {

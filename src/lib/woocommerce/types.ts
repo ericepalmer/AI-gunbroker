@@ -38,6 +38,17 @@ export type LinkedListingSummary = {
   endingAt: string | null;
 };
 
+/** Open WooCommerce order that is not completed/shipped. */
+export type WooUnshippedOrder = {
+  orderId: number;
+  orderNumber: string;
+  status: string;
+  dateCreated: string | null;
+  total: number | null;
+  customerName: string | null;
+  lineItems: { name: string; quantity: number; sku: string | null }[];
+};
+
 export type WooProductCard = {
   productId: number;
   parentId: number;

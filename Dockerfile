@@ -8,11 +8,16 @@ FROM node:${NODE_VERSION} AS deps
 WORKDIR /app
 
 COPY package.json package-lock.json ./
-RUN npm ci --no-audit --no-fund
+# postinstall runs prisma generate, which needs the schema. Generate in the builder instead.
+RUN npm ci --ignore-scripts --no-audit --no-fund
 
 # -----------------------------------------------------------------------------
 FROM node:${NODE_VERSION} AS builder
 WORKDIR /app
+
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends openssl ca-certificates \
+  && rm -rf /var/lib/apt/lists/*
 
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
@@ -20,7 +25,12 @@ COPY . .
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV NODE_ENV=production
 
-RUN npm run build
+# This Droplet has 512MB RAM. Node otherwise caps the heap from cgroup memory and
+# the typecheck dies, so allow the build to spill into swap.
+RUN NODE_OPTIONS="--max-old-space-size=1400" npm run build
+
+RUN npm prune --omit=dev \
+  && npm install --ignore-scripts --no-audit --no-fund --save-prod prisma@6.19.3 tsx@4.23.12
 
 # -----------------------------------------------------------------------------
 FROM node:${NODE_VERSION} AS runner
@@ -47,12 +57,6 @@ COPY --from=builder --chown=node:node /app/public ./public
 COPY --from=builder --chown=node:node /app/prisma ./prisma
 COPY --from=builder --chown=node:node /app/src ./src
 COPY --from=builder --chown=node:node /app/next.config.ts ./
-
-# Keep prisma + tsx for migrate/seed; drop other devDependencies.
-USER root
-RUN npm prune --omit=dev \
-  && npm install --no-audit --no-fund --save-prod prisma@6.19.3 tsx@4.23.12 \
-  && chown -R node:node /app
 
 COPY --chown=node:node scripts/docker-entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh

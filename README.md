@@ -29,7 +29,16 @@ Sign-up requires email verification. In development, messages are stored at `/de
 
 ## Deploy on DigitalOcean (Droplet + Docker)
 
-The app uses **SQLite**. Deploy on a single Droplet with a Docker volume so the database survives restarts. Do not scale to multiple instances until you migrate to Postgres.
+The app uses **SQLite**. Deploy on a single Droplet. The database file is `data/chamber.db` on the server (bind-mounted to `/data` in the container). Do not scale to multiple instances until you migrate to Postgres.
+
+To bring the database you already have (users, listings, sold orders, saved connections):
+
+```bash
+mkdir -p data
+sqlite3 prisma/dev.db ".backup 'data/chamber.db'"
+```
+
+Copy `data/chamber.db` to the Droplet with the app. Use the same `BETTER_AUTH_SECRET` as the `.env` that created that file. A different secret leaves the encrypted GunBroker, ShipStation, and WooCommerce passwords unreadable. Leave `SEED_ON_START=false`.
 
 ### 1. Droplet
 
@@ -87,13 +96,10 @@ docker compose up -d --build
 # migrate deploy runs automatically on container start
 ```
 
-SQLite data lives in the Docker volume `chamber_data`. Back it up before risky changes:
+SQLite data lives in `data/chamber.db` next to the app. Back it up before risky changes:
 
 ```bash
-docker compose exec app ls -la /data
-VOLUME="$(docker volume ls -q | grep chamber_data | head -1)"
-docker run --rm -v "$VOLUME":/data -v "$PWD":/backup alpine \
-  tar czf /backup/chamber-db-$(date +%Y%m%d).tgz -C /data .
+sqlite3 data/chamber.db ".backup 'chamber-db-backup.db'"
 ```
 
 ### App Platform note

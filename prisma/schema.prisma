@@ -272,6 +272,12 @@ model SoldOrder {
   shipStationOrderId   String?
   shipStationStatus    String?
   shipStationSyncedAt  DateTime?
+  /// Carrier tracking status: awaiting_shipment | in_transit | delivered | exception | unknown
+  deliveryStatus       String?
+  deliveryStatusLabel  String?
+  estimatedDeliveryAt  DateTime?
+  deliveredAt          DateTime?
+  trackingSyncedAt     DateTime?
   /// Buyer notified on GunBroker (complete / status 5). Independent of ShipStation shipped.
   gunBrokerNotified    Boolean   @default(false)
   workStatus           String    @default("pending")

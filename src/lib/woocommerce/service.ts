@@ -8,7 +8,12 @@ import {
 } from "@/lib/gunbroker/listings";
 import { prisma, WOO_PRODUCT_HAS_ATTRIBUTES_JSON } from "@/lib/prisma";
 import { WOOCOMMERCE_PROVIDER, normalizeStoreUrl } from "@/lib/woocommerce/config";
-import { listWooProducts, getWooProduct, pingWooCommerce } from "@/lib/woocommerce/client";
+import {
+  listOpenWooOrders,
+  listWooProducts,
+  getWooProduct,
+  pingWooCommerce,
+} from "@/lib/woocommerce/client";
 import { classifyWooProduct, isLinkableWooKind, wooKindLabel } from "@/lib/woocommerce/classify";
 import {
   attributesFromJson,
@@ -47,6 +52,7 @@ import {
   type WooLinkPreviewField,
   type WooProductCard,
   type WooProductDetail,
+  type WooUnshippedOrder,
 } from "@/lib/woocommerce/types";
 
 function wooAttributesJson(attributes: { name: string; slug: string | null; value: string }[]) {
@@ -198,6 +204,23 @@ export async function isWooCommerceConnected(userId: string) {
     select: { status: true, secretsCipher: true },
   });
   return row?.status === "connected" && Boolean(row.secretsCipher);
+}
+
+/** Live WC orders that are not completed (pending / processing / on-hold). */
+export async function listUnshippedWooOrders(userId: string): Promise<{
+  orders: WooUnshippedOrder[];
+  error: string | null;
+}> {
+  if (!(await isWooCommerceConnected(userId))) {
+    return { orders: [], error: null };
+  }
+  try {
+    const { secrets } = await credentialsFor(userId);
+    const orders = await listOpenWooOrders(secrets);
+    return { orders, error: null };
+  } catch (error) {
+    return { orders: [], error: explainWooError(error) };
+  }
 }
 
 export async function connectWooCommerceStore(

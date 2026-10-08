@@ -4,6 +4,12 @@ set -eu
 DATA_DIR="${DATA_DIR:-/data}"
 mkdir -p "$DATA_DIR"
 
+if [ -f "${DATA_DIR}/chamber.db" ]; then
+  echo "Using existing database at ${DATA_DIR}/chamber.db"
+else
+  echo "No database at ${DATA_DIR}/chamber.db — Prisma will create an empty one."
+fi
+
 if [ -z "${DATABASE_URL:-}" ]; then
   export DATABASE_URL="file:${DATA_DIR}/chamber.db"
 fi

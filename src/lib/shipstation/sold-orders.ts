@@ -15,6 +15,8 @@ import type {
   ShipStationOrder,
   ShipStationShipment,
 } from "@/lib/shipstation/types";
+import { notifyGunBrokerOfShipment } from "@/lib/gunbroker/notify-shipment";
+import { isGunBrokerConnected } from "@/lib/gunbroker/service";
 import { prisma } from "@/lib/prisma";
 
 const CARRIER_LABELS: Record<string, string> = {
@@ -239,6 +241,11 @@ async function applyShipStationShipment(
       detailsJson: JSON.stringify(nextDetails),
       ...(shipped
         ? {
+            deliveryStatus: row.deliveryStatus === "delivered" ? "delivered" : "in_transit",
+            deliveryStatusLabel:
+              row.deliveryStatus === "delivered"
+                ? row.deliveryStatusLabel ?? "Delivered"
+                : "In transit",
             ...(row.gunBrokerNotified && (row.shipStationOrderId || order.orderId)
               ? {
                   workStatus: "complete" as const,
@@ -261,7 +268,37 @@ async function applyShipStationShipment(
     shipDate,
     shipStationOrderId: String(order.orderId),
     updated: shipped && Boolean(trackingNumber || shipDate),
+    gunBrokerNotified: row.gunBrokerNotified,
+    notifyError: null,
   } satisfies ShipStationCheckResult;
+}
+
+async function notifyGunBrokerIfShipped(
+  userId: string,
+  orderId: string,
+  result: ShipStationCheckResult,
+  alreadyNotified: boolean,
+): Promise<ShipStationCheckResult> {
+  const tracking = result.trackingNumber?.trim();
+  const shipped = result.orderStatus === "shipped" || result.updated;
+  if (!shipped || !tracking || alreadyNotified || result.notifyError) {
+    return result;
+  }
+  if (!(await isGunBrokerConnected(userId))) {
+    return {
+      ...result,
+      notifyError: "Connect GunBroker in Settings before notifying the buyer.",
+    };
+  }
+  try {
+    await notifyGunBrokerOfShipment(userId, orderId, tracking, result.carrier);
+    return { ...result, gunBrokerNotified: true, notifyError: null };
+  } catch (error) {
+    return {
+      ...result,
+      notifyError: error instanceof Error ? error.message : "Could not notify GunBroker.",
+    };
+  }
 }
 
 export async function sendSoldOrderToShipStation(userId: string, orderId: string) {
@@ -282,12 +319,25 @@ export async function sendSoldOrderToShipStation(userId: string, orderId: string
     createShipStationOrder(credentials, input),
   );
 
+  let details: Record<string, unknown> = {};
+  try {
+    details = JSON.parse(row.detailsJson) as Record<string, unknown>;
+  } catch {
+    details = {};
+  }
+  if (details.source !== "woocommerce") {
+    details.source = "gunbroker";
+  }
+
   await prisma.soldOrder.update({
     where: { userId_orderId: { userId, orderId } },
     data: {
       shipStationOrderId: String(order.orderId),
       shipStationStatus: order.orderStatus,
       shipStationSyncedAt: new Date(),
+      detailsJson: JSON.stringify(details),
+      deliveryStatus: "awaiting_shipment",
+      deliveryStatusLabel: "Awaiting shipment",
     },
   });
 
@@ -332,6 +382,8 @@ export async function checkSoldOrderOnShipStation(
         shipDate: null,
         shipStationOrderId: null,
         updated: false,
+        gunBrokerNotified: row.gunBrokerNotified,
+        notifyError: null,
       };
     }
 
@@ -345,7 +397,8 @@ export async function checkSoldOrderOnShipStation(
     } catch {
       shipment = null;
     }
-    return applyShipStationShipment(userId, orderId, order, shipment);
+    const applied = await applyShipStationShipment(userId, orderId, order, shipment);
+    return notifyGunBrokerIfShipped(userId, orderId, applied, row.gunBrokerNotified);
   });
 }
 
@@ -361,15 +414,20 @@ export async function updateSoldOrdersFromShipStation(userId: string) {
       shipStationOrderId: true,
       shipStationStatus: true,
       trackingNumber: true,
+      gunBrokerNotified: true,
     },
   });
   const pending = rows.filter((row) => {
     if (!row.shipStationOrderId) return false;
-    return row.shipStationStatus !== "shipped" || !row.trackingNumber;
+    const needsShipCheck = row.shipStationStatus !== "shipped" || !row.trackingNumber;
+    const needsGunBrokerNotice = !row.gunBrokerNotified && Boolean(row.trackingNumber);
+    return needsShipCheck || needsGunBrokerNotice;
   });
 
   let checked = 0;
   let shipped = 0;
+  let notified = 0;
+  const notifyErrors: string[] = [];
   for (const row of pending) {
     try {
       const result = await checkSoldOrderOnShipStation(userId, row.orderId);
@@ -377,11 +435,15 @@ export async function updateSoldOrdersFromShipStation(userId: string) {
       if (result.updated || result.orderStatus === "shipped" || result.trackingNumber) {
         shipped += 1;
       }
-    } catch {
-      // Keep checking remaining orders.
+      if (result.gunBrokerNotified && !row.gunBrokerNotified) notified += 1;
+      if (result.notifyError) notifyErrors.push(`Order ${row.orderId}: ${result.notifyError}`);
+    } catch (error) {
+      notifyErrors.push(
+        `Order ${row.orderId}: ${error instanceof Error ? error.message : "Could not update this order."}`,
+      );
     }
   }
 
   await markIntegrationSynced(userId, SHIPSTATION_PROVIDER);
-  return { checked, shipped };
+  return { checked, shipped, notified, notifyErrors };
 }

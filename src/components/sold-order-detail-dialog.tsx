@@ -9,7 +9,11 @@ import { orderStatusDescription, orderStatusTone } from "@/lib/gunbroker/order-s
 import type { SoldOrderCard, SoldOrderShipTo } from "@/lib/gunbroker/orders";
 import { formatSoldAndShippedDates, formatSoldDateOnly } from "@/lib/sold-order-dates";
 import { soldOrderCardIsDark } from "@/lib/sold-order-card-theme";
-import { isOrderShipped } from "@/lib/sold-order-filters";
+import {
+  isOrderShipped,
+  soldOrderSource,
+  soldOrderSourceLabel,
+} from "@/lib/sold-order-filters";
 
 function formatDate(value: string | null) {
   return formatSoldDateOnly(value);
@@ -98,7 +102,10 @@ export function SoldOrderDetailDialog({
             {shipped ? (
               <Badge tone="success">Shipped</Badge>
             ) : (
-              <Badge tone="warning">Unshipped</Badge>
+              <>
+                <Badge tone="warning">Unshipped</Badge>
+                <Badge tone="default">{soldOrderSourceLabel(soldOrderSource(order))}</Badge>
+              </>
             )}
           </div>
         </div>

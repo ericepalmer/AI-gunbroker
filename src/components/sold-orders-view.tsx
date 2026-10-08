@@ -17,12 +17,12 @@ import {
 import { soldOrderCardIsDark, soldOrderCardTheme } from "@/lib/sold-order-card-theme";
 import {
   isOrderShipped,
+  matchesProcessingDesk,
   matchesSoldOrderDateFilter,
-  matchesSoldOrderShipFilter,
   SOLD_ORDER_DATE_FILTERS,
-  SOLD_ORDER_SHIP_FILTERS,
+  soldOrderSource,
+  soldOrderSourceLabel,
   type SoldOrderDateFilter,
-  type SoldOrderShipFilter,
 } from "@/lib/sold-order-filters";
 import { cn } from "@/lib/utils";
 
@@ -67,6 +67,7 @@ function SoldOrderRow({
   const total = formatMoney(order.totalAmount);
   const qty = soldOrderTotalQuantity(order);
   const buyerLine = soldOrderBuyerLine(order);
+  const sourceLabel = soldOrderSourceLabel(soldOrderSource(order));
 
   function onKeyDown(event: KeyboardEvent<HTMLDivElement>) {
     if (event.key === "Enter" || event.key === " ") {
@@ -113,7 +114,14 @@ function SoldOrderRow({
               <p className="truncate" title={buyerLine}>
                 {buyerLine}
               </p>
-              <p>Order: {order.orderId}</p>
+              <p>
+                Order: {order.orderId}
+                {!shipped ? (
+                  <span className="ml-2 opacity-80" title="Order source">
+                    · {sourceLabel}
+                  </span>
+                ) : null}
+              </p>
               {order.trackingNumber ? (
                 <p className="truncate" title={`${order.carrier ?? ""} ${order.trackingNumber}`.trim()}>
                   Track: {order.carrier ? `${order.carrier} ` : ""}
@@ -145,7 +153,6 @@ export function SoldOrdersView({
   shipStationConnected: boolean;
 }) {
   const router = useRouter();
-  const [shipFilter, setShipFilter] = useState<SoldOrderShipFilter>("unshipped");
   const [dateFilter, setDateFilter] = useState<SoldOrderDateFilter>("all");
   const [query, setQuery] = useState("");
   const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
@@ -157,20 +164,16 @@ export function SoldOrdersView({
     [orders, selectedOrderId],
   );
 
-  const counts = useMemo(() => {
-    const base = orders.filter((order) => matchesSoldOrderDateFilter(order.orderDate, dateFilter));
-    const unshipped = base.filter((order) => !isOrderShipped(order)).length;
-    const shipped = base.filter((order) => isOrderShipped(order)).length;
-    return { unshipped, shipped, all: base.length };
+  const deskOrders = useMemo(() => {
+    return orders.filter(
+      (order) =>
+        matchesProcessingDesk(order) && matchesSoldOrderDateFilter(order.orderDate, dateFilter),
+    );
   }, [orders, dateFilter]);
 
   const visibleOrders = useMemo(() => {
-    return orders.filter((order) => {
-      if (!matchesSoldOrderDateFilter(order.orderDate, dateFilter)) return false;
-      if (!matchesSoldOrderShipFilter(order, shipFilter)) return false;
-      return matchesQuery(order, query);
-    });
-  }, [orders, dateFilter, shipFilter, query]);
+    return deskOrders.filter((order) => matchesQuery(order, query));
+  }, [deskOrders, query]);
 
   function sendToShipStation(orderId: string) {
     if (pending) return;
@@ -188,11 +191,7 @@ export function SoldOrdersView({
   }
 
   const emptyMessage =
-    shipFilter === "unshipped"
-      ? "No in-progress orders in this date range. Sync from GunBroker or widen the filter."
-      : shipFilter === "shipped"
-        ? "No complete orders in this date range."
-        : "No sold orders in this date range. Sync from GunBroker to pull the last 90 days.";
+    "No unshipped orders in this date range. Sync from GunBroker or widen the filter.";
 
   return (
     <div className="space-y-4">
@@ -214,30 +213,13 @@ export function SoldOrdersView({
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
-        {SOLD_ORDER_SHIP_FILTERS.map((filter) => {
-          const count =
-            filter.id === "unshipped"
-              ? counts.unshipped
-              : filter.id === "shipped"
-                ? counts.shipped
-                : counts.all;
-          return (
-            <Button
-              key={filter.id}
-              type="button"
-              size="sm"
-              variant={shipFilter === filter.id ? "default" : "secondary"}
-              className="h-7 px-2 text-xs"
-              onClick={() => setShipFilter(filter.id)}
-            >
-              {filter.label} ({count})
-            </Button>
-          );
-        })}
+        <span className="text-xs text-muted-foreground">
+          Unshipped ({deskOrders.length})
+        </span>
         <Input
           value={query}
           onChange={(event) => setQuery(event.target.value)}
-          placeholder="Order, buyer, item, tracking"
+          placeholder="Order, buyer, item"
           className="h-7 max-w-[220px] px-2 text-xs"
         />
       </div>

@@ -360,6 +360,86 @@ export async function listWooProducts(
   return { storeUrl, products: expanded };
 }
 
+export type WooOrderRecord = {
+  orderId: number;
+  orderNumber: string;
+  status: string;
+  dateCreated: string | null;
+  total: number | null;
+  customerName: string | null;
+  lineItems: { name: string; quantity: number; sku: string | null }[];
+};
+
+function mapOrder(item: unknown): WooOrderRecord | null {
+  const record = asRecord(item);
+  if (!record) return null;
+  const orderId = asInt(record.id);
+  if (orderId == null) return null;
+  const billing = asRecord(record.billing);
+  const shipping = asRecord(record.shipping);
+  const first =
+    asString(billing?.first_name) ?? asString(shipping?.first_name) ?? "";
+  const last =
+    asString(billing?.last_name) ?? asString(shipping?.last_name) ?? "";
+  const customerName = `${first} ${last}`.trim() || asString(billing?.company) || null;
+  const rawItems = Array.isArray(record.line_items) ? record.line_items : [];
+  const lineItems = rawItems
+    .map((line) => {
+      const row = asRecord(line);
+      if (!row) return null;
+      const name = asString(row.name);
+      if (!name) return null;
+      return {
+        name,
+        quantity: asInt(row.quantity) ?? 1,
+        sku: asString(row.sku),
+      };
+    })
+    .filter((line): line is NonNullable<typeof line> => Boolean(line));
+
+  return {
+    orderId,
+    orderNumber:
+      asString(record.number) ?? asString(record.order_key) ?? String(orderId),
+    status: asString(record.status) ?? "unknown",
+    dateCreated: asString(record.date_created) ?? asString(record.date_created_gmt),
+    total: money(record.total),
+    customerName,
+    lineItems,
+  };
+}
+
+/** Orders WC still has open (not completed / cancelled / refunded). */
+export async function listOpenWooOrders(credentials: WooCommerceSecrets) {
+  const orders: WooOrderRecord[] = [];
+  let storeUrl = credentials.storeUrl;
+  let page = 1;
+  let pages = 1;
+  while (page <= pages && page <= 5) {
+    const result = await wooRequest<unknown>({
+      credentials: { ...credentials, storeUrl },
+      path: "/orders",
+      query: {
+        page,
+        per_page: 50,
+        status: "pending,processing,on-hold",
+        orderby: "date",
+        order: "desc",
+      },
+    });
+    storeUrl = result.storeUrl;
+    pages = result.totalPages ?? 1;
+    const rows = Array.isArray(result.payload) ? result.payload : [];
+    for (const row of rows) {
+      const mapped = mapOrder(row);
+      if (mapped) orders.push(mapped);
+    }
+    if (rows.length === 0) break;
+    page += 1;
+  }
+  return orders;
+}
+
 export async function getWooProduct(
   credentials: WooCommerceSecrets,
   productId: number,

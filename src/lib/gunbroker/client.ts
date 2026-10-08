@@ -261,6 +261,41 @@ export async function getOrder(accessToken: string, orderId: string) {
   });
 }
 
+/** GunBroker ship-carrier ids for PUT /Orders/{orderID}/Shipping. */
+export function gunBrokerCarrierId(carrier: string | null | undefined, trackingNumber?: string | null) {
+  const blob = `${carrier ?? ""}`.toLowerCase();
+  if (/\bfedex\b/.test(blob)) return 1;
+  if (/\busps\b|\bstamps[_\s-]?com\b/.test(blob)) return 3;
+  if (/\bups\b/.test(blob)) return 2;
+  if (trackingNumber?.toUpperCase().startsWith("1Z")) return 2;
+  return null;
+}
+
+export async function updateOrderShipping(
+  accessToken: string,
+  orderId: string,
+  input: { trackingNumber: string; carrierId: 1 | 2 | 3 },
+) {
+  return gunBrokerRequest({
+    path: `/Orders/${encodeURIComponent(orderId)}/Shipping`,
+    method: "PUT",
+    accessToken,
+    body: {
+      TrackingNumber: input.trackingNumber,
+      Carrier: input.carrierId,
+    },
+  });
+}
+
+export async function markOrderShipped(accessToken: string, orderId: string) {
+  return gunBrokerRequest({
+    path: `/Orders/${encodeURIComponent(orderId)}/Flags`,
+    method: "PUT",
+    accessToken,
+    body: { OrderShipped: true },
+  });
+}
+
 export async function getItem(accessToken: string, itemId: string) {
   return gunBrokerRequest({
     path: `/Items/${encodeURIComponent(itemId)}`,
